@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,16 +78,17 @@ func TestC_StartupFailsWithoutItsKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := map[string]map[string]string{
-		"missing_private_key":      {"JWT_PRIVATE_KEY_FILE": ""},
-		"missing_public_key":       {"JWT_PUBLIC_KEY_FILE": ""},
-		"missing_database_url":     {"DATABASE_URL": ""},
-		"url_without_password":     {"DATABASE_URL": "postgres://security_app@postgres:5432/multitour"},
-		"unreadable_private_key":   {"JWT_PRIVATE_KEY_FILE": filepath.Join(t.TempDir(), "absent.pem")},
-		"private_key_not_a_pem":    {"JWT_PRIVATE_KEY_FILE": garbage},
-		"public_key_not_a_pem":     {"JWT_PUBLIC_KEY_FILE": garbage},
-		"public_key_of_another":    {"JWT_PUBLIC_KEY_FILE": other.public},
-		"key_smaller_than_2048":    {"JWT_PRIVATE_KEY_FILE": small.private, "JWT_PUBLIC_KEY_FILE": small.public},
-		"unparseable_database_url": {"DATABASE_URL": "postgres://security_app:" + secret + "@bad host/%zz"},
+		"missing_private_key":       {"JWT_PRIVATE_KEY_FILE": ""},
+		"missing_public_key":        {"JWT_PUBLIC_KEY_FILE": ""},
+		"missing_database_url":      {"DATABASE_URL": ""},
+		"url_without_password":      {"DATABASE_URL": "postgres://security_app@postgres:5432/multitour"},
+		"unreadable_private_key":    {"JWT_PRIVATE_KEY_FILE": filepath.Join(t.TempDir(), "absent.pem")},
+		"private_key_not_a_pem":     {"JWT_PRIVATE_KEY_FILE": garbage},
+		"public_key_not_a_pem":      {"JWT_PUBLIC_KEY_FILE": garbage},
+		"public_key_of_another":     {"JWT_PUBLIC_KEY_FILE": other.public},
+		"key_smaller_than_2048":     {"JWT_PRIVATE_KEY_FILE": small.private, "JWT_PUBLIC_KEY_FILE": small.public},
+		"database_url_not_postgres": {"DATABASE_URL": "http://security_app:" + secret + "@postgres:5432/multitour"},
+		"unparseable_database_url":  {"DATABASE_URL": "postgres://security_app:" + secret + "@bad host/%zz"},
 	}
 	for name, overrides := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -98,5 +100,29 @@ func TestC_StartupFailsWithoutItsKeys(t *testing.T) {
 				t.Fatalf("the error leaks the password: %v", err)
 			}
 		})
+	}
+}
+
+func TestC_StartupRejectsAnInvalidPort(t *testing.T) {
+	files := writeKeys(t, 2048)
+	for _, port := range []string{"abc", "0", "70000", "80 ", "1.2.3.4:80"} {
+		t.Run(port, func(t *testing.T) {
+			_, err := loadConfig(environment(files, map[string]string{"HTTP_PORT": port}), os.ReadFile)
+			if err == nil || strings.Contains(err.Error(), port) {
+				t.Fatalf("an invalid port must fail without repeating it, got %v", err)
+			}
+		})
+	}
+}
+
+func TestC_ConfigNeverPrintsItsSecrets(t *testing.T) {
+	cfg, err := loadConfig(environment(writeKeys(t, 2048), nil), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
+		if printed := fmt.Sprintf(verb, cfg); strings.Contains(printed, secret) {
+			t.Fatalf("%s prints the password: %s", verb, printed)
+		}
 	}
 }
