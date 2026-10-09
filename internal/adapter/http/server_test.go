@@ -3,6 +3,7 @@ package httpadapter_test
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -84,6 +85,38 @@ func TestC_ProtectedRouteWithoutTokenAnswers401(t *testing.T) {
 	if body.TraceID == "" || body.TraceID != rec.Header().Get("X-Correlation-Id") {
 		t.Fatalf("traceId %q must be the correlation id %q", body.TraceID, rec.Header().Get("X-Correlation-Id"))
 	}
+	if rec.Header().Get("WWW-Authenticate") != "Bearer" || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("a 401 must carry WWW-Authenticate: Bearer and Cache-Control: no-store, got %v", rec.Header())
+	}
+}
+
+func TestC_OtherAuthorizationSchemesAreRejected(t *testing.T) {
+	key := newKey(t)
+	valid := sign(t, jwt.SigningMethodRS256, key, jwt.MapClaims{"sub": "u1", "exp": time.Now().Add(time.Hour).Unix()})
+	for name, header := range map[string]string{"basic": "Basic abc", "lowercase_scheme": "bearer " + valid, "empty_token": "Bearer ", "no_scheme": valid} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, protectedPath, nil)
+			req.Header.Set("Authorization", header)
+			rec := httptest.NewRecorder()
+			newHandler(key).ServeHTTP(rec, req)
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", rec.Code)
+			}
+		})
+	}
+}
+
+func TestC_ClockToleranceIsThirtySeconds(t *testing.T) {
+	key := newKey(t)
+	h := newHandler(key)
+	within := sign(t, jwt.SigningMethodRS256, key, jwt.MapClaims{"sub": "u1", "exp": time.Now().Add(-20 * time.Second).Unix()})
+	past := sign(t, jwt.SigningMethodRS256, key, jwt.MapClaims{"sub": "u1", "exp": time.Now().Add(-40 * time.Second).Unix()})
+	if code := get(h, protectedPath, within, "").Code; code != http.StatusNotFound {
+		t.Fatalf("a token expired 20 s ago is inside the tolerance, got %d", code)
+	}
+	if code := get(h, protectedPath, past, "").Code; code != http.StatusUnauthorized {
+		t.Fatalf("a token expired 40 s ago is outside the tolerance, got %d", code)
+	}
 }
 
 func TestC_UnknownRouteWithValidTokenAnswersTheEnvelope(t *testing.T) {
@@ -103,19 +136,28 @@ func TestC_CorrelationIdIsReusedOrGenerated(t *testing.T) {
 	if got := get(h, "/health", "", "").Header().Get("X-Correlation-Id"); got == "" {
 		t.Fatal("a missing id must be generated")
 	}
+	if got := get(h, "/health", "", "not a safe id").Header().Get("X-Correlation-Id"); got == "" || got == "not a safe id" {
+		t.Fatalf("an unsafe id must be replaced, got %q", got)
+	}
 }
 
 func TestC_InvalidTokensAreRejected(t *testing.T) {
 	key := newKey(t)
 	future := time.Now().Add(time.Hour).Unix()
+	publicDER, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cases := map[string]string{
-		"alg_none":    sign(t, jwt.SigningMethodNone, jwt.UnsafeAllowNoneSignatureType, jwt.MapClaims{"sub": "u1", "exp": future}),
-		"alg_hs256":   sign(t, jwt.SigningMethodHS256, []byte("shared-secret"), jwt.MapClaims{"sub": "u1", "exp": future}),
-		"without_sub": sign(t, jwt.SigningMethodRS256, key, jwt.MapClaims{"exp": future}),
-		"without_exp": sign(t, jwt.SigningMethodRS256, key, jwt.MapClaims{"sub": "u1"}),
-		"expired":     sign(t, jwt.SigningMethodRS256, key, jwt.MapClaims{"sub": "u1", "exp": time.Now().Add(-time.Hour).Unix()}),
-		"foreign_key": sign(t, jwt.SigningMethodRS256, newKey(t), jwt.MapClaims{"sub": "u1", "exp": future}),
-		"not_a_token": "not-a-jwt",
+		// the classic algorithm confusion: HS256 signed with the bytes of the public key
+		"alg_hs256_with_public_key": sign(t, jwt.SigningMethodHS256, publicDER, jwt.MapClaims{"sub": "u1", "exp": future}),
+		"alg_none":                  sign(t, jwt.SigningMethodNone, jwt.UnsafeAllowNoneSignatureType, jwt.MapClaims{"sub": "u1", "exp": future}),
+		"alg_hs256":                 sign(t, jwt.SigningMethodHS256, []byte("shared-secret"), jwt.MapClaims{"sub": "u1", "exp": future}),
+		"without_sub":               sign(t, jwt.SigningMethodRS256, key, jwt.MapClaims{"exp": future}),
+		"without_exp":               sign(t, jwt.SigningMethodRS256, key, jwt.MapClaims{"sub": "u1"}),
+		"expired":                   sign(t, jwt.SigningMethodRS256, key, jwt.MapClaims{"sub": "u1", "exp": time.Now().Add(-time.Hour).Unix()}),
+		"foreign_key":               sign(t, jwt.SigningMethodRS256, newKey(t), jwt.MapClaims{"sub": "u1", "exp": future}),
+		"not_a_token":               "not-a-jwt",
 	}
 	h := newHandler(key)
 	for name, token := range cases {
