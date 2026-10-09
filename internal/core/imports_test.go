@@ -62,3 +62,16 @@ func TestC_ImportRuleRejectsLookalikes(t *testing.T) {
 		}
 	}
 }
+
+// isAllowed is the rule of the guard. A standard library path has no dot in its first element, and
+// the core is matched on the path boundary so a sibling such as .../internal/corex is refused.
+func isAllowed(imported string) bool {
+	if imported == "C" { // cgo would reach outside the module without a dotted path
+		return false
+	}
+	first, _, _ := strings.Cut(imported, "/")
+	if !strings.Contains(first, ".") {
+		return true
+	}
+	return imported == corePrefix || strings.HasPrefix(imported, corePrefix+"/")
+}
