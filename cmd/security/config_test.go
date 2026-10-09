@@ -71,6 +71,7 @@ func TestC_StartupAcceptsAValidConfiguration(t *testing.T) {
 func TestC_StartupFailsWithoutItsKeys(t *testing.T) {
 	files := writeKeys(t, 2048)
 	other := writeKeys(t, 2048)
+	small := writeKeys(t, 1024)
 	garbage := filepath.Join(t.TempDir(), "garbage.pem")
 	if err := os.WriteFile(garbage, []byte("not a pem"), 0o600); err != nil {
 		t.Fatal(err)
@@ -84,7 +85,7 @@ func TestC_StartupFailsWithoutItsKeys(t *testing.T) {
 		"private_key_not_a_pem":    {"JWT_PRIVATE_KEY_FILE": garbage},
 		"public_key_not_a_pem":     {"JWT_PUBLIC_KEY_FILE": garbage},
 		"public_key_of_another":    {"JWT_PUBLIC_KEY_FILE": other.public},
-		"key_smaller_than_2048":    {"JWT_PRIVATE_KEY_FILE": writeKeys(t, 1024).private},
+		"key_smaller_than_2048":    {"JWT_PRIVATE_KEY_FILE": small.private, "JWT_PUBLIC_KEY_FILE": small.public},
 		"unparseable_database_url": {"DATABASE_URL": "postgres://security_app:" + secret + "@bad host/%zz"},
 	}
 	for name, overrides := range cases {
