@@ -1,0 +1,25 @@
+openapi: 3.0.3
+info:
+  title: Multitour security
+  version: 0.1.0
+  description: >
+    The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
+    (ADR-004 D7). The skeleton publishes only /health; each story adds its operations before its code.
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Liveness probe, answered without a token
+      responses:
+        "200":
+          description: The service is running
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                additionalProperties: false
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
