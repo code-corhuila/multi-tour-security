@@ -59,20 +59,46 @@ writable_schemas() {
       AND has_table_privilege('security_app', format('%I.%I', table_schema, table_name), 'INSERT,UPDATE,DELETE')"
 }
 
+# A positive control first: the check must SEE a write privilege when one exists, or it would pass
+# only because the other schema is out of reach. The grant is revoked right after.
 writes_only_its_schema() {
+  psql_admin -c "GRANT INSERT ON other_domain.probe TO security_app" >/dev/null || return 1
+  seen=$(writable_schemas)
+  psql_admin -c "REVOKE INSERT ON other_domain.probe FROM security_app" >/dev/null || return 1
+  [ "$seen" = "other_domain,security" ] || { echo "the privilege query did not see a granted write: '$seen'"; return 1; }
   [ "$(writable_schemas)" = "security" ] || { echo "security_app can write in: $(writable_schemas)"; return 1; }
   [ "$(psql_admin -c "SELECT has_schema_privilege('security_app', 'public', 'CREATE')")" = "f" ] || { echo "security_app can create in public"; return 1; }
+  [ "$(psql_admin -c "SELECT has_schema_privilege('security_app', 'security', 'CREATE')")" = "f" ] || { echo "security_app can create objects in security"; return 1; }
+}
+
+# What AC-00.3 promises besides the writes: its own control table, login-less roles without a password,
+# and the grant of the writer role to the instance user.
+owns_its_control_table_and_roles() {
+  [ "$(psql_admin -c "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('databasechangelog_security', 'databasechangeloglock_security')")" = 2 ] || { echo "the control tables with the security suffix are missing"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM information_schema.tables WHERE table_name IN ('databasechangelog', 'databasechangeloglock')")" = 0 ] || { echo "a default-named control table exists, two domains would share it"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_authid WHERE rolname IN ('security_reader', 'security_writer') AND NOT rolcanlogin AND rolpassword IS NULL")" = 2 ] || { echo "the roles must be NOLOGIN and have no password"; return 1; }
+  [ "$(psql_admin -c "SELECT pg_has_role('security_app', 'security_writer', 'MEMBER')")" = "t" ] || { echo "security_app is not a member of security_writer"; return 1; }
+}
+
+# The state of the control table, so a second update that applied anything shows as a difference
+changelog_state() {
+  psql_admin -c "SELECT count(*) || ':' || coalesce(md5(string_agg(id || md5sum, ',' ORDER BY orderexecuted)), '') FROM databasechangelog_security"
 }
 
 second_update_changes_nothing() {
+  before=$(changelog_state)
   out=$(lb update 2>&1) || { printf '%s\n' "$out" | tail -n 8; return 1; }
-  printf '%s\n' "$out" | grep -Eq 'Run: +0|No changesets to deploy|up to date' || { printf '%s\n' "$out" | tail -n 8; echo "the second update applied changes"; return 1; }
+  [ "$before" = "$(changelog_state)" ] || { echo "the second update changed the control table"; return 1; }
+  case $before in 0:*) echo "no changeset was ever recorded"; return 1 ;; esac
 }
 
 rolled_back_to_empty() {
   lb rollback-count 999 >/dev/null 2>&1 || { echo "rollback-count 999 failed"; return 1; }
   [ "$(psql_admin -c "SELECT count(*) FROM information_schema.schemata WHERE schema_name = 'security'")" = 0 ] || { echo "the schema security is still there"; return 1; }
   [ "$(psql_admin -c "SELECT count(*) FROM pg_roles WHERE rolname IN ('security_reader', 'security_writer')")" = 0 ] || { echo "a security role is still there"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member WHERE r.rolname = 'security_app'")" = 0 ] || { echo "security_app is still a member of a role"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_default_acl")" = 0 ] || { echo "a default privilege is left behind"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM databasechangelog_security")" = 0 ] || { echo "the control table still lists changesets"; return 1; }
 }
 
 # ---- an empty instance, as multi-tour-infra-postgres leaves it for this domain (J.7)
@@ -93,9 +119,13 @@ psql_admin -c "CREATE EXTENSION IF NOT EXISTS pgcrypto" \
 check "I·db_ci_builds_from_empty" lb update
 check "I·db_ci_second_update_changes_nothing" second_update_changes_nothing
 check "I·security_app_writes_only_its_schema" writes_only_its_schema
+check "I·owns_its_control_table_and_roles" owns_its_control_table_and_roles
 check "I·db_ci_rolls_back_to_empty" rolled_back_to_empty
 check "I·db_ci_rebuilds_after_the_rollback" lb update
 check "I·security_app_writes_only_its_schema_after_the_rebuild" writes_only_its_schema
+check "I·owns_its_control_table_and_roles_after_the_rebuild" owns_its_control_table_and_roles
 
+# the single name the spec uses for the whole sequence (AC-00.3)
+[ "$fail" = 0 ] && echo "PASS  I·db_ci_builds_reruns_rolls_back_and_rebuilds"
 [ "$fail" = 0 ] && echo "ALL CHECKS PASSED" || echo "SOME CHECKS FAILED"
 exit "$fail"
