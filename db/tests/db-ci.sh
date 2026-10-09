@@ -12,9 +12,10 @@ cd "$(dirname "$0")/../.." || exit 1
 # Git Bash on Windows rewrites container paths such as /workspace; no effect elsewhere
 export MSYS_NO_PATHCONV=1
 
-LIQUIBASE_IMAGE="liquibase/liquibase:5.0.4"
 POSTGRES_IMAGE="postgres:18.6-alpine"
 RUN_ID="security-dbci-$$"
+# the same image the runner of deploy/compose.yml uses: Liquibase plus the PostgreSQL driver
+LIQUIBASE_IMAGE="$RUN_ID-liquibase"
 DB="multitour_test"
 ADMIN_PASSWORD="admin-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 APP_PASSWORD="app-$(head -c 12 /dev/urandom | od -An -tx1 | tr -d ' \n')"
@@ -23,6 +24,7 @@ fail=0
 cleanup() {
   docker rm -f "$RUN_ID" >/dev/null 2>&1 || true
   docker network rm "$RUN_ID" >/dev/null 2>&1 || true
+  docker rmi "$LIQUIBASE_IMAGE" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 trap 'exit 1' INT TERM
@@ -74,6 +76,7 @@ rolled_back_to_empty() {
 }
 
 # ---- an empty instance, as multi-tour-infra-postgres leaves it for this domain (J.7)
+docker build -q -f deploy/liquibase.Dockerfile -t "$LIQUIBASE_IMAGE" deploy >/dev/null || { echo "the runner image did not build"; exit 1; }
 docker network create "$RUN_ID" >/dev/null || exit 1
 docker run -d --name "$RUN_ID" --network "$RUN_ID" -e POSTGRES_DB="$DB" -e POSTGRES_PASSWORD="$ADMIN_PASSWORD" "$POSTGRES_IMAGE" >/dev/null || exit 1
 ready=0
