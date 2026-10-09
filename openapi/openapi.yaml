@@ -4,22 +4,34 @@ info:
   version: 0.1.0
   description: >
     The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
-    (ADR-004 D7). The skeleton publishes only /health; each story adds its operations before its code.
+    (ADR-004 D7). It carries only the operations the service implements, each as the design writes
+    it; every story adds its operations here before its code.
 paths:
   /health:
     get:
-      operationId: health
-      summary: Liveness probe, answered without a token
+      summary: Health check
+      tags: [Health]
+      security: []
       responses:
         "200":
-          description: The service is running
+          description: Service is healthy
           content:
             application/json:
               schema:
                 type: object
                 required: [status]
-                additionalProperties: false
                 properties:
                   status:
                     type: string
                     enum: [ok]
+                  timestamp:
+                    type: string
+                    format: date-time
+                  dependencies:
+                    type: object
+                    properties:
+                      database:
+                        type: string
+                        enum: [ok, degraded, down]
+        "503":
+          description: Service unavailable (dependency down)
