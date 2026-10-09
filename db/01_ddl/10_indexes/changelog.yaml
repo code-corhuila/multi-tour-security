@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: security-ddl-indexes-001
+      author: Molina211
+      labels: "HU-SEC-001,ddl,indexes"
+      comment: "The listing of pending events and the purge of published ones (ADR-004 D4, D10)."
+      changes:
+        - sqlFile:
+            path: 001_create_outbox_indexes.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/001_create_outbox_indexes.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

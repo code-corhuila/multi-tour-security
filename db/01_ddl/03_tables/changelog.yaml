@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: security-ddl-tables-001
+      author: Molina211
+      labels: "HU-SEC-001,ddl,tables"
+      comment: "The outbox of the events this service publishes, written in the same transaction as the change (ADR-004 D4)."
+      changes:
+        - sqlFile:
+            path: 001_create_outbox_event.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/001_create_outbox_event.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

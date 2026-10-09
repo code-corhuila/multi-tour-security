@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: security-ddl-schemas-001
+      author: Molina211
+      labels: "HU-SEC-001,ddl,schemas"
+      comment: "Create the security schema. Nothing of this service lives in public."
+      changes:
+        - sqlFile:
+            path: 001_create_schema_security.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/01_schemas/001_create_schema_security.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
