@@ -110,6 +110,33 @@ func (r *Accounts) RecordFailure(ctx context.Context, id string, now time.Time, 
 	return a, blocked, err
 }
 
+// One statement: the hash, the end of the temporary state, the cutoff of the older sessions and the event of the
+// revocation are all written or none. The row must still carry a temporary credential in force, so two changes at
+// once have one winner.
+const changePassword = `
+WITH changed AS (
+    UPDATE security.identity SET
+        password_hash = $2, temporary_until = NULL, failed_count = 0, first_failed_at = NULL, blocked_until = NULL,
+        sessions_revoked_from = GREATEST(COALESCE(sessions_revoked_from, $3::timestamptz), $3::timestamptz)
+    WHERE identity_id = $1::uuid AND temporary_until IS NOT NULL AND temporary_until > $3::timestamptz
+    RETURNING identity_id, tenant_id, sessions_revoked_from
+)
+INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, payload, correlation_id, occurred_at)
+SELECT tenant_id, 'AccountSessionsRevoked', identity_id,
+       jsonb_build_object('accountId', identity_id,
+           'revokedFrom', to_char(sessions_revoked_from AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+       $4, $3::timestamptz
+FROM changed`
+
+// ChangePassword stores the first password chosen in place of the temporary credential.
+func (r *Accounts) ChangePassword(ctx context.Context, id, hash string, now time.Time, correlationID string) error {
+	tag, err := r.pool.Exec(ctx, changePassword, id, hash, now, correlationID)
+	if err == nil && tag.RowsAffected() == 0 {
+		err = port.ErrNotTemporary
+	}
+	return err
+}
+
 // RecordSuccess clears the count and the block.
 func (r *Accounts) RecordSuccess(ctx context.Context, id string) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE security.identity SET failed_count = 0, first_failed_at = NULL, blocked_until = NULL

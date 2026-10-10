@@ -14,6 +14,7 @@ import (
 	"github.com/getkin/kin-openapi/openapi3filter"
 	"github.com/getkin/kin-openapi/routers/legacy"
 
+	"github.com/code-corhuila/multi-tour-security/internal/core/changepassword"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
 )
 
@@ -39,18 +40,20 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		method, path, contentType, body string
 		svc                             *fakeSignIn
 		refresh                         *fakeRefresh
+		change                          *fakeChange
+		token                           string
 		want                            int
 	}
 	scenarios := []scenario{{method: http.MethodGet, path: "/health", want: http.StatusOK}}
 	for _, route := range []string{tenantRoute, platformRoute} {
 		scenarios = append(scenarios,
-			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{tokens: okTokens()}, nil, http.StatusOK},
-			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: signin.ErrRefused}, nil, http.StatusUnauthorized},
-			scenario{http.MethodPost, route, "application/json", `{"email":`, &fakeSignIn{}, nil, http.StatusBadRequest},
-			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: signin.ErrInvalidRequest}, nil, http.StatusBadRequest},
-			scenario{http.MethodPost, route, "text/plain", goodBody, &fakeSignIn{}, nil, http.StatusUnsupportedMediaType},
-			scenario{http.MethodPost, route, "application/json", big, &fakeSignIn{}, nil, http.StatusRequestEntityTooLarge},
-			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: errors.New("boom")}, nil, http.StatusInternalServerError},
+			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{tokens: okTokens()}, nil, nil, "", http.StatusOK},
+			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: signin.ErrRefused}, nil, nil, "", http.StatusUnauthorized},
+			scenario{http.MethodPost, route, "application/json", `{"email":`, &fakeSignIn{}, nil, nil, "", http.StatusBadRequest},
+			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: signin.ErrInvalidRequest}, nil, nil, "", http.StatusBadRequest},
+			scenario{http.MethodPost, route, "text/plain", goodBody, &fakeSignIn{}, nil, nil, "", http.StatusUnsupportedMediaType},
+			scenario{http.MethodPost, route, "application/json", big, &fakeSignIn{}, nil, nil, "", http.StatusRequestEntityTooLarge},
+			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: errors.New("boom")}, nil, nil, "", http.StatusInternalServerError},
 		)
 	}
 
@@ -70,6 +73,25 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		scenarios = append(scenarios, scenario{method: http.MethodPost, path: refreshRoute, contentType: r.contentType, body: r.body, refresh: r.svc, want: r.want})
 	}
 
+	bigPassword := `{"newPassword":"` + strings.Repeat("p", 4200) + `"}`
+	pc := bearer(t, "password-change")
+	for _, c := range []struct {
+		token, contentType, body string
+		svc                      *fakeChange
+		want                     int
+	}{
+		{pc, "application/json", passwordBody, &fakeChange{}, http.StatusNoContent},
+		{"", "application/json", passwordBody, &fakeChange{}, http.StatusUnauthorized},
+		{pc, "application/json", passwordBody, &fakeChange{err: signin.ErrRefused}, http.StatusUnauthorized},
+		{pc, "application/json", `{"newPassword":`, &fakeChange{}, http.StatusBadRequest},
+		{pc, "application/json", passwordBody, &fakeChange{err: changepassword.ErrWeakPassword}, http.StatusBadRequest},
+		{pc, "text/plain", passwordBody, &fakeChange{}, http.StatusUnsupportedMediaType},
+		{pc, "application/json", bigPassword, &fakeChange{}, http.StatusRequestEntityTooLarge},
+		{pc, "application/json", passwordBody, &fakeChange{err: errors.New("boom")}, http.StatusInternalServerError},
+	} {
+		scenarios = append(scenarios, scenario{method: http.MethodPut, path: passwordRoute, contentType: c.contentType, body: c.body, change: c.svc, token: c.token, want: c.want})
+	}
+
 	key := newKey(t)
 	exercised := map[string]bool{}
 	for _, s := range scenarios {
@@ -80,7 +102,13 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		if s.refresh != nil {
 			handler = refreshHandler(s.refresh, io.Discard)
 		}
+		if s.change != nil {
+			handler = changeHandler(s.change, io.Discard)
+		}
 		req := httptest.NewRequest(s.method, s.path, strings.NewReader(s.body))
+		if s.token != "" {
+			req.Header.Set("Authorization", "Bearer "+s.token)
+		}
 		if s.contentType != "" {
 			req.Header.Set("Content-Type", s.contentType)
 		}
