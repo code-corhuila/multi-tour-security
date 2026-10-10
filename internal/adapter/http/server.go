@@ -41,6 +41,9 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
+	if s.refresh != nil {
+		mux.HandleFunc("POST /api/v1/security/public/sessions/refresh", s.renew)
+	}
 	if s.signIn != nil {
 		// public by design: a person who signs in has no token yet
 		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/sessions", s.signInTenant)
@@ -54,6 +57,7 @@ type server struct {
 	verifier TokenVerifier
 	logger   *slog.Logger
 	signIn   SignInService
+	refresh  RefreshService
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {

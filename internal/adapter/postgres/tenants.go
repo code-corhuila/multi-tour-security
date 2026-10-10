@@ -38,11 +38,20 @@ func (r *Tenants) Apply(ctx context.Context, c tenant.Copy) (bool, error) {
 	return err == nil && tag.RowsAffected() == 1, err
 }
 
+const selectTenant = `SELECT tenant_id::text, identifier, status, occurred_at FROM security.tenant_copy WHERE `
+
 func (r *Tenants) FindByIdentifier(ctx context.Context, identifier string) (tenant.Copy, bool, error) {
+	return r.find(ctx, selectTenant+`identifier = $1`, identifier)
+}
+
+func (r *Tenants) FindByID(ctx context.Context, tenantID string) (tenant.Copy, bool, error) {
+	return r.find(ctx, selectTenant+`tenant_id = $1::uuid`, tenantID)
+}
+
+func (r *Tenants) find(ctx context.Context, query, arg string) (tenant.Copy, bool, error) {
 	var c tenant.Copy
 	var status string
-	err := r.pool.QueryRow(ctx, `SELECT tenant_id::text, identifier, status, occurred_at FROM security.tenant_copy WHERE identifier = $1`,
-		identifier).Scan(&c.TenantID, &c.Identifier, &status, &c.OccurredAt)
+	err := r.pool.QueryRow(ctx, query, arg).Scan(&c.TenantID, &c.Identifier, &status, &c.OccurredAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return tenant.Copy{}, false, nil
 	}

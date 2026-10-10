@@ -144,6 +144,16 @@ func TestA_TheRolesOfTheNewTokenAreThoseOfNowAndNotThoseOfTheSessionStart(t *tes
 	}
 }
 
+func TestA_APlatformAccountWithOnlyTenantRolesIsRefused(t *testing.T) {
+	w := newWorld()
+	w.accounts.byID["root"] = account.Account{ID: "root", Status: account.Active}
+	w.accounts.roles["root"] = []string{"ANALYST"}
+	w.sessions.renewed = port.Renewed{AccountID: "root", SessionID: "s-2"}
+	if _, err := w.service.Renew(ctx, oldValue); err != signin.ErrRefused {
+		t.Fatalf("got %v", err)
+	}
+}
+
 func TestA_ThePlatformAdministratorRenewsWithoutATenant(t *testing.T) {
 	w := newWorld()
 	w.accounts.byID["root"] = account.Account{ID: "root", Status: account.Active}
@@ -178,6 +188,13 @@ func TestA_EveryFailureOfARenewalIsTheSameRefusal(t *testing.T) {
 		{"account with no tenant and no platform role", func(w *world) {
 			w.accounts.byID[accountID] = account.Account{ID: accountID, Status: account.Active}
 		}},
+		{"account with a tenant that holds the platform role", func(w *world) {
+			w.accounts.roles[accountID] = []string{"TENANT_ADMINISTRATOR", "PLATFORM_ADMINISTRATOR"}
+		}},
+		// a password reset to a temporary one must force the change: the old session cannot keep full access
+		{"temporary credential in force", func(w *world) {
+			w.accounts.byID[accountID] = account.Account{ID: accountID, TenantID: tenantID, Status: account.Active, TemporaryUntil: now.Add(time.Hour)}
+		}},
 	}
 	for _, c := range cases {
 		w := newWorld()
@@ -185,6 +202,9 @@ func TestA_EveryFailureOfARenewalIsTheSameRefusal(t *testing.T) {
 		got, err := w.service.Renew(ctx, oldValue)
 		if err != signin.ErrRefused || got != (signin.Tokens{}) {
 			t.Errorf("%s: %v %+v", c.name, err, got)
+		}
+		if len(w.sessions.oldHashes) != 1 {
+			t.Errorf("%s: the rotation was attempted %d times, it must be exactly once and before anything else decides", c.name, len(w.sessions.oldHashes))
 		}
 		if len(w.signer.claims) != 0 {
 			t.Errorf("%s: a refusal signed a token", c.name)
