@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: security-ddl-alter-001
+      author: Molina211
+      labels: "HU-SEC-001,ddl,alter"
+      comment: "The foreign keys inside the schema, with their ON DELETE and their indexes."
+      changes:
+        - sqlFile:
+            path: 001_add_account_foreign_keys.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/001_add_account_foreign_keys.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
