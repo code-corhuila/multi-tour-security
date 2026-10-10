@@ -82,7 +82,11 @@ func TestC_WhatIsMissingOrWrongIsRefusedWithoutEchoingThePassword(t *testing.T) 
 		"weak password":        {url, rootEmail, "sh0rt!A\n", "policy"},
 		"common password":      {url, rootEmail, "Password1!\n", "policy"},
 		"no database url":      {"", rootEmail, rootPassword, "DATABASE_URL"},
-		"database unreachable": {"postgres://security_app:s3cret-pw@127.0.0.1:1/x?sslmode=disable", rootEmail, rootPassword, "database"},
+		"database unreachable": {"postgres://security_app:s3cret-pw@127.0.0.1:1/x?sslmode=disable", rootEmail, rootPassword, "does not answer"},
+		"not a postgres URL":   {"mysql://u:s3cret-pw@h/x", rootEmail, rootPassword, "postgres URL"},
+		"blank e-mail":         {url, "   ", rootPassword, "e-mail"},
+		"password over 72":     {url, rootEmail, strings.Repeat("aA1!", 19) + "\n", "policy"},
+		"line over 1 KB":       {url, rootEmail, strings.Repeat("aA1!", 400), "policy"},
 	}
 	for name, c := range cases {
 		out, err := runBootstrap(c.url, c.email, c.stdin)
@@ -111,8 +115,8 @@ func TestC_ThePasswordIsReadAsTypedWithOnlyTheLineEndRemoved(t *testing.T) {
 
 func TestC_AnUnknownCommandIsRefusedAndTheKnownOnesAreListed(t *testing.T) {
 	var out bytes.Buffer
-	err := execute(context.Background(), []string{"drop-everything"}, envOf(nil), strings.NewReader(""), &out)
-	if err == nil || !strings.Contains(err.Error(), "bootstrap-platform-admin") {
+	err := execute(context.Background(), []string{"Sup3r-Secret-Pass!"}, envOf(nil), strings.NewReader(""), &out)
+	if err == nil || !strings.Contains(err.Error(), "bootstrap-platform-admin") || strings.Contains(err.Error(), "Sup3r") {
 		t.Fatalf("%v", err)
 	}
 }
