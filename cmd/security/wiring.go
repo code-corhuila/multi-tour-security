@@ -9,6 +9,7 @@ import (
 	httpadapter "github.com/code-corhuila/multi-tour-security/internal/adapter/http"
 	jwtadapter "github.com/code-corhuila/multi-tour-security/internal/adapter/jwt"
 	"github.com/code-corhuila/multi-tour-security/internal/adapter/postgres"
+	"github.com/code-corhuila/multi-tour-security/internal/core/changepassword"
 	"github.com/code-corhuila/multi-tour-security/internal/core/refresh"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,6 +29,7 @@ func buildHandler(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Han
 		DummyHash: dummy, Clock: time.Now,
 	}
 	renewal := &refresh.Service{Tenants: tenants, Accounts: accounts, Sessions: sessions, Signer: signer, Clock: time.Now}
+	firstPassword := &changepassword.Service{Accounts: accounts, Hasher: bcryptadapter.Hasher{}, Clock: time.Now}
 	return httpadapter.New(httpadapter.NewVerifier(cfg.publicKey), logger,
-		httpadapter.WithSignIn(signIn), httpadapter.WithRefresh(renewal)), nil
+		httpadapter.WithSignIn(signIn), httpadapter.WithRefresh(renewal), httpadapter.WithChangePassword(firstPassword)), nil
 }
