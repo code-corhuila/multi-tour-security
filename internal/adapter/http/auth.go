@@ -11,7 +11,20 @@ import (
 // tokenLeeway is the clock tolerance of ADR-004 D10.
 const tokenLeeway = 30 * time.Second
 
-var errMissingSubject = errors.New("token has no subject")
+var (
+	errMissingSubject = errors.New("token has no subject")
+	errMalformedClaim = errors.New("token has a claim of the wrong type")
+)
+
+// textClaim reads a claim that is text when it is there: absent or null is empty, any other type is not acceptable.
+func textClaim(body jwt.MapClaims, name string) (string, bool) {
+	raw, present := body[name]
+	if !present || raw == nil {
+		return "", true
+	}
+	text, isText := raw.(string)
+	return text, isText
+}
 
 // Claims is what the rest of the service may know about the caller.
 type Claims struct {
@@ -20,6 +33,8 @@ type Claims struct {
 	// only ("password-change", "restricted") and empty for an ordinary one.
 	TenantID string
 	Access   string
+	// Roles are the roles of the token that are text; nil when the claim is absent.
+	Roles []string
 }
 
 // Verifier validates the access tokens of this service with the public key only: no service
@@ -50,9 +65,28 @@ func (v *Verifier) Verify(raw string) (Claims, error) {
 		return Claims{}, errMissingSubject
 	}
 	claims := Claims{Subject: subject}
-	if body, ok := token.Claims.(jwt.MapClaims); ok {
-		claims.TenantID, _ = body["tenantId"].(string)
-		claims.Access, _ = body["access"].(string)
+	body, _ := token.Claims.(jwt.MapClaims)
+	// fail closed: a claim that is present with the wrong type is a token this service did not issue, and it is refused
+	// instead of read as an absent one (a tenant or a mark erased by its type would widen who may enter)
+	var ok bool
+	if claims.TenantID, ok = textClaim(body, "tenantId"); !ok {
+		return Claims{}, errMalformedClaim
+	}
+	if claims.Access, ok = textClaim(body, "access"); !ok {
+		return Claims{}, errMalformedClaim
+	}
+	if raw, present := body["roles"]; present && raw != nil {
+		list, isList := raw.([]any)
+		if !isList {
+			return Claims{}, errMalformedClaim
+		}
+		for _, role := range list {
+			name, isText := role.(string)
+			if !isText {
+				return Claims{}, errMalformedClaim
+			}
+			claims.Roles = append(claims.Roles, name)
+		}
 	}
 	return claims, nil
 }
