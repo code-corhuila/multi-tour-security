@@ -15,6 +15,7 @@ import (
 	"github.com/getkin/kin-openapi/routers/legacy"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/changepassword"
+	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
 )
 
@@ -94,6 +95,38 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 
 	key := newKey(t)
 	exercised := map[string]bool{}
+	run := func(handler http.Handler, method, path, contentType, body, token string, want int) {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		req.Header.Set("X-Correlation-Id", "gate-1")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Errorf("%s %s: status %d, want %d (%s)", method, path, rec.Code, want, rec.Body)
+			return
+		}
+
+		route, params, err := router.FindRoute(req)
+		if err != nil {
+			t.Fatalf("%s %s is not in the contract: %v", method, path, err)
+		}
+		response := &openapi3filter.ResponseValidationInput{
+			RequestValidationInput: &openapi3filter.RequestValidationInput{Request: req, PathParams: params, Route: route},
+			Status:                 rec.Code,
+			Header:                 rec.Header(),
+			Options:                &openapi3filter.Options{IncludeResponseStatus: true},
+		}
+		response.SetBodyBytes(rec.Body.Bytes())
+		if err := openapi3filter.ValidateResponse(ctx, response); err != nil {
+			t.Errorf("%s %s answered %d against the contract: %v", method, path, rec.Code, err)
+		}
+		exercised[method+" "+route.Path+" "+strconv.Itoa(rec.Code)] = true
+	}
 	for _, s := range scenarios {
 		handler := newHandler(key)
 		if s.svc != nil {
@@ -105,36 +138,38 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		if s.change != nil {
 			handler = changeHandler(s.change, io.Discard)
 		}
-		req := httptest.NewRequest(s.method, s.path, strings.NewReader(s.body))
-		if s.token != "" {
-			req.Header.Set("Authorization", "Bearer "+s.token)
-		}
-		if s.contentType != "" {
-			req.Header.Set("Content-Type", s.contentType)
-		}
-		req.Header.Set("X-Correlation-Id", "gate-1")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != s.want {
-			t.Errorf("%s %s: status %d, want %d (%s)", s.method, s.path, rec.Code, s.want, rec.Body)
-			continue
-		}
+		run(handler, s.method, s.path, s.contentType, s.body, s.token, s.want)
+	}
 
-		route, params, err := router.FindRoute(req)
-		if err != nil {
-			t.Fatalf("%s %s is not in the contract: %v", s.method, s.path, err)
-		}
-		response := &openapi3filter.ResponseValidationInput{
-			RequestValidationInput: &openapi3filter.RequestValidationInput{Request: req, PathParams: params, Route: route},
-			Status:                 rec.Code,
-			Header:                 rec.Header(),
-			Options:                &openapi3filter.Options{IncludeResponseStatus: true},
-		}
-		response.SetBodyBytes(rec.Body.Bytes())
-		if err := openapi3filter.ValidateResponse(ctx, response); err != nil {
-			t.Errorf("%s %s answered %d against the contract: %v", s.method, s.path, rec.Code, err)
-		}
-		exercised[s.method+" "+route.Path+" "+strconv.Itoa(rec.Code)] = true
+	// the internal routes: only the token of a service, and the answers of the use case as they come
+	svcToken := serviceBearer(t)
+	page := outbox.Page{Data: []outbox.Event{sampleEvent()}, Page: 1, Limit: 20, Total: 1, TotalPages: 1}
+	bigAttempt := `{"error":"` + strings.Repeat("e", 4200) + `"}`
+	for _, c := range []struct {
+		method, path, contentType, body, token string
+		svc                                    *fakeOutbox
+		want                                   int
+	}{
+		{http.MethodGet, outboxRoute, "", "", svcToken, &fakeOutbox{page: page}, http.StatusOK},
+		{http.MethodGet, outboxRoute + "?limit=500", "", "", svcToken, &fakeOutbox{}, http.StatusBadRequest},
+		{http.MethodGet, outboxRoute, "", "", "", &fakeOutbox{}, http.StatusUnauthorized},
+		{http.MethodGet, outboxRoute, "", "", tokenWith(t, []string{"PLATFORM_ADMINISTRATOR"}, "", ""), &fakeOutbox{}, http.StatusForbidden},
+		{http.MethodGet, outboxRoute, "", "", svcToken, &fakeOutbox{err: errors.New("boom")}, http.StatusInternalServerError},
+		{http.MethodPost, publishedPath, "", "", svcToken, &fakeOutbox{event: sampleEvent()}, http.StatusOK},
+		{http.MethodPost, publishedPath, "", "", "", &fakeOutbox{}, http.StatusUnauthorized},
+		{http.MethodPost, publishedPath, "", "", tokenWith(t, nil, "", ""), &fakeOutbox{}, http.StatusForbidden},
+		{http.MethodPost, publishedPath, "", "", svcToken, &fakeOutbox{err: outbox.ErrNotFound}, http.StatusNotFound},
+		{http.MethodPost, publishedPath, "", "", svcToken, &fakeOutbox{err: errors.New("boom")}, http.StatusInternalServerError},
+		{http.MethodPost, attemptsPath, "application/json", `{"error":"503"}`, svcToken, &fakeOutbox{event: sampleEvent()}, http.StatusOK},
+		{http.MethodPost, attemptsPath, "application/json", `{"error":`, svcToken, &fakeOutbox{}, http.StatusBadRequest},
+		{http.MethodPost, attemptsPath, "application/json", `{"error":"503"}`, "", &fakeOutbox{}, http.StatusUnauthorized},
+		{http.MethodPost, attemptsPath, "application/json", `{"error":"503"}`, tokenWith(t, []string{"ANALYST"}, "t-1", ""), &fakeOutbox{}, http.StatusForbidden},
+		{http.MethodPost, attemptsPath, "application/json", `{"error":"503"}`, svcToken, &fakeOutbox{err: outbox.ErrNotFound}, http.StatusNotFound},
+		{http.MethodPost, attemptsPath, "text/plain", `{"error":"503"}`, svcToken, &fakeOutbox{}, http.StatusUnsupportedMediaType},
+		{http.MethodPost, attemptsPath, "application/json", bigAttempt, svcToken, &fakeOutbox{}, http.StatusRequestEntityTooLarge},
+		{http.MethodPost, attemptsPath, "application/json", `{"error":"503"}`, svcToken, &fakeOutbox{err: errors.New("boom")}, http.StatusInternalServerError},
+	} {
+		run(outboxHandler(c.svc, io.Discard), c.method, c.path, c.contentType, c.body, c.token, c.want)
 	}
 
 	for path, item := range doc.Paths.Map() {
