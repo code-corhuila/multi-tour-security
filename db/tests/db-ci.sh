@@ -101,6 +101,58 @@ rolled_back_to_empty() {
   [ "$(psql_admin -c "SELECT count(*) FROM databasechangelog_security")" = 0 ] || { echo "the control table still lists changesets"; return 1; }
 }
 
+# ---- the probes of the tables of HU-SEC-001 (spec 001-hu-sec-001, task SEC-04): what the engine refuses
+T1=00000000-0000-4000-8000-0000000000a1
+T2=00000000-0000-4000-8000-0000000000a2
+HASH='$2a$12$'"$(printf 'a%.0s' $(seq 1 53))"
+SESSION=00000000-0000-4000-8000-0000000000b1
+
+# a statement the database must refuse, for the reason named by a fragment of its message
+refused() { # fragment, statement
+  out=$(psql_admin -c "$2" 2>&1) && { echo "the database accepted: $2"; return 1; }
+  printf '%s' "$out" | grep -q "$1" || { echo "refused, but not for the expected reason ($1): $out"; return 1; }
+}
+clean() { psql_admin -c "TRUNCATE security.refresh_token, security.session, security.membership_role, security.membership, security.identity, security.tenant_copy" >/dev/null 2>&1; }
+identity() { # tenant (quoted uuid or NULL), e-mail, status
+  printf "INSERT INTO security.identity (identity_id, tenant_id, email_normalized, password_hash, identity_status) VALUES (gen_random_uuid(), %s, '%s', '%s', '%s')" "$1" "$2" "$HASH" "${3:-ACTIVE}"
+}
+
+account_is_unique_per_tenant_and_email_even_when_inactive() {
+  clean; psql_admin -c "$(identity "'$T1'" ana@example.com INACTIVE)" >/dev/null || return 1
+  refused uq_identity_tenant_email "$(identity "'$T1'" ana@example.com)"
+}
+same_email_in_another_tenant_is_another_account() {
+  clean; psql_admin -c "$(identity "'$T1'" ana@example.com)" -c "$(identity "'$T2'" ana@example.com)" >/dev/null
+}
+the_platform_administrator_email_is_unique_though_it_has_no_tenant() {
+  clean; psql_admin -c "$(identity NULL root@example.com)" >/dev/null || return 1
+  refused uq_identity_tenant_email "$(identity NULL root@example.com)"
+}
+one_membership_per_account_and_roles_never_repeat() {
+  clean; psql_admin -c "$(identity "'$T1'" ana@example.com)" >/dev/null || return 1
+  id=$(psql_admin -c "SELECT identity_id FROM security.identity LIMIT 1")
+  psql_admin -c "INSERT INTO security.membership (membership_id, identity_id, tenant_id, membership_status, created_by) VALUES ('$SESSION', '$id', '$T1', 'ACTIVE', 'test')" >/dev/null || return 1
+  refused uq_membership_identity "INSERT INTO security.membership (membership_id, identity_id, tenant_id, membership_status, created_by) VALUES (gen_random_uuid(), '$id', '$T1', 'ACTIVE', 'test')" || return 1
+  psql_admin -c "INSERT INTO security.membership_role (membership_id, role) VALUES ('$SESSION', 'TENANT_ADMINISTRATOR')" >/dev/null || return 1
+  refused pk_membership_role "INSERT INTO security.membership_role (membership_id, role) VALUES ('$SESSION', 'TENANT_ADMINISTRATOR')" || return 1
+  refused chk_membership_role_role "INSERT INTO security.membership_role (membership_id, role) VALUES ('$SESSION', 'SUPERUSER')"
+}
+password_hash_must_be_a_bcrypt_hash() {
+  clean; refused chk_identity_password_hash "INSERT INTO security.identity (identity_id, tenant_id, email_normalized, password_hash, identity_status) VALUES (gen_random_uuid(), '$T1', 'ana@example.com', 'plain-password', 'ACTIVE')"
+}
+refresh_token_is_kept_only_as_a_hash() {
+  clean; psql_admin -c "$(identity "'$T1'" ana@example.com)" >/dev/null || return 1
+  id=$(psql_admin -c "SELECT identity_id FROM security.identity LIMIT 1")
+  psql_admin -c "INSERT INTO security.session (session_id, identity_id, expires_at) VALUES ('$SESSION', '$id', now() + interval '7 days')" >/dev/null || return 1
+  refused chk_refresh_token_hash "INSERT INTO security.refresh_token (token_hash, session_id, expires_at) VALUES ('plain-secret', '$SESSION', now() + interval '7 days')" || return 1
+  psql_admin -c "INSERT INTO security.refresh_token (token_hash, session_id, expires_at) VALUES ('$(printf 'ab%.0s' $(seq 1 32))', '$SESSION', now() + interval '7 days')" >/dev/null
+}
+tenant_copy_has_one_row_per_tenant_and_a_known_status() {
+  clean; psql_admin -c "INSERT INTO security.tenant_copy (tenant_id, identifier, status, occurred_at) VALUES ('$T1', 'acme-tours', 'ACTIVE', now())" >/dev/null || return 1
+  refused pk_tenant_copy "INSERT INTO security.tenant_copy (tenant_id, identifier, status, occurred_at) VALUES ('$T1', 'acme-tours', 'ACTIVE', now())" || return 1
+  refused chk_tenant_copy_status "INSERT INTO security.tenant_copy (tenant_id, identifier, status, occurred_at) VALUES ('$T2', 'other-tours', 'DELETED', now())"
+}
+
 # ---- an empty instance, as multi-tour-infra-postgres leaves it for this domain (J.7)
 docker build -q -f deploy/liquibase.Dockerfile -t "$LIQUIBASE_IMAGE" deploy >/dev/null || { echo "the runner image did not build"; exit 1; }
 docker network create "$RUN_ID" >/dev/null || exit 1
@@ -120,6 +172,14 @@ check "I·db_ci_builds_from_empty" lb update
 check "I·db_ci_second_update_changes_nothing" second_update_changes_nothing
 check "I·security_app_writes_only_its_schema" writes_only_its_schema
 check "I·owns_its_control_table_and_roles" owns_its_control_table_and_roles
+check "I·account_is_unique_per_tenant_and_email_even_when_inactive" account_is_unique_per_tenant_and_email_even_when_inactive
+check "I·same_email_in_another_tenant_is_another_account" same_email_in_another_tenant_is_another_account
+check "I·the_platform_administrator_email_is_unique_though_it_has_no_tenant" the_platform_administrator_email_is_unique_though_it_has_no_tenant
+check "I·one_membership_per_account_and_roles_never_repeat" one_membership_per_account_and_roles_never_repeat
+check "I·password_hash_must_be_a_bcrypt_hash" password_hash_must_be_a_bcrypt_hash
+check "I·refresh_token_is_kept_only_as_a_hash" refresh_token_is_kept_only_as_a_hash
+check "I·tenant_copy_has_one_row_per_tenant_and_a_known_status" tenant_copy_has_one_row_per_tenant_and_a_known_status
+clean
 check "I·db_ci_rolls_back_to_empty" rolled_back_to_empty
 check "I·db_ci_rebuilds_after_the_rollback" lb update
 check "I·security_app_writes_only_its_schema_after_the_rebuild" writes_only_its_schema
