@@ -16,3 +16,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: security-ddl-tables-002
+      author: Molina211
+      labels: "HU-SEC-001,ddl,tables"
+      comment: "Accounts, memberships and their roles, sessions, renewal values (hashed) and the copy of the tenants (ADR-004 D5, ADR-005 E1)."
+      changes:
+        - sqlFile:
+            path: 002_create_accounts.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/002_create_accounts.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
