@@ -13,6 +13,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
 	"github.com/code-corhuila/multi-tour-security/internal/core/refresh"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
+	"github.com/code-corhuila/multi-tour-security/internal/core/tenantevent"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -34,5 +35,5 @@ func buildHandler(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Han
 	events := &outbox.Service{Store: postgres.NewOutbox(pool), Clock: time.Now, Policy: outbox.DefaultPolicy}
 	return httpadapter.New(httpadapter.NewVerifier(cfg.publicKey), logger,
 		httpadapter.WithSignIn(signIn), httpadapter.WithRefresh(renewal), httpadapter.WithChangePassword(firstPassword),
-		httpadapter.WithOutbox(events)), nil
+		httpadapter.WithOutbox(events), httpadapter.WithTenantEvents(&tenantevent.Service{Tenants: tenants})), nil
 }
