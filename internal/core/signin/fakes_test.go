@@ -57,6 +57,9 @@ func (f *fakeAccounts) FindByEmail(_ context.Context, tenantID, email string) (a
 	a, ok := f.byKey[tenantID+"|"+email]
 	return a, ok, f.findErr
 }
+func (f *fakeAccounts) ChangePassword(context.Context, string, string, time.Time, string) error {
+	return errors.New("not used by sign-in")
+}
 func (f *fakeAccounts) FindByID(context.Context, string) (account.Account, bool, error) {
 	return account.Account{}, false, nil
 }
@@ -102,6 +105,8 @@ func (f *fakeSessions) RevokeAll(context.Context, string, time.Time, string) err
 
 // fakeHasher accepts the hash "hash:" + password and keeps every hash it was asked to compare against.
 type fakeHasher struct{ compared []string }
+
+func (f *fakeHasher) Hash(password string) (string, error) { return "hash:" + password, nil }
 
 func (f *fakeHasher) Compare(hash, password string) bool {
 	f.compared = append(f.compared, hash)
