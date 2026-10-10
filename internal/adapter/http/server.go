@@ -44,6 +44,12 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
+	if s.outbox != nil {
+		internal := func(h http.HandlerFunc) http.Handler { return s.protect(s.requireService(h)) }
+		mux.Handle("GET /api/v1/security/internal/outbox", internal(s.listOutbox))
+		mux.Handle("POST /api/v1/security/internal/outbox/{eventId}/published", internal(s.markPublished))
+		mux.Handle("POST /api/v1/security/internal/outbox/{eventId}/attempts", internal(s.recordAttempt))
+	}
 	if s.change != nil {
 		mux.Handle("PUT /api/v1/security/sessions/password", s.protect(http.HandlerFunc(s.changePassword)))
 	}
@@ -65,6 +71,7 @@ type server struct {
 	signIn   SignInService
 	refresh  RefreshService
 	change   ChangePasswordService
+	outbox   OutboxService
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
