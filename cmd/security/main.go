@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	httpadapter "github.com/code-corhuila/multi-tour-security/internal/adapter/http"
+	"github.com/code-corhuila/multi-tour-security/internal/adapter/postgres"
 )
 
 // Runtime limits of Annex C, with the values of ADR-004 D10. Declaring them here makes each one a
@@ -25,7 +25,7 @@ const (
 	idleTimeout       = 60 * time.Second
 	shutdownTimeout   = 20 * time.Second
 
-	// Applied by the database adapter when it arrives with the migration.
+	// Applied by postgres.Open.
 	dbPoolSize         = 10
 	dbConnectionWait   = 5 * time.Second
 	dbStatementTimeout = 5 * time.Second
@@ -53,7 +53,17 @@ func run(logger *slog.Logger) error {
 	// After the first signal the default behavior returns, so a second one ends the process.
 	go func() { <-ctx.Done(); stop() }()
 
-	handler := httpadapter.New(httpadapter.NewVerifier(cfg.publicKey), logger)
+	pool, err := postgres.Open(ctx, cfg.databaseURL, postgres.Limits{
+		MaxConns: dbPoolSize, ConnectTimeout: dbConnectionWait, StatementTimeout: dbStatementTimeout,
+	})
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	handler, err := buildHandler(pool, cfg, logger)
+	if err != nil {
+		return err
+	}
 	return serve(ctx, listener, handler, logger)
 }
 
