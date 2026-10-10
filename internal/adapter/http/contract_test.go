@@ -17,6 +17,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/changepassword"
 	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
+	"github.com/code-corhuila/multi-tour-security/internal/core/tenantevent"
 )
 
 // Every answer is validated against the published contract, each scenario says the status it must give, and the last
@@ -104,6 +105,9 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 			req.Header.Set("Content-Type", contentType)
 		}
 		req.Header.Set("X-Correlation-Id", "gate-1")
+		if strings.HasSuffix(path, "/events") {
+			req.Header.Set("Idempotency-Key", eventKey)
+		}
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
 		if rec.Code != want {
@@ -170,6 +174,27 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		{http.MethodPost, attemptsPath, "application/json", `{"error":"503"}`, svcToken, &fakeOutbox{err: errors.New("boom")}, http.StatusInternalServerError},
 	} {
 		run(outboxHandler(c.svc, io.Discard), c.method, c.path, c.contentType, c.body, c.token, c.want)
+	}
+
+	// the receiver of the events of a tenant, with the id of the event as its idempotency key
+	bigEvent := strings.Replace(envelopeJSON("TenantCreated", "ACTIVE"), `"country":"CO"`, `"notes":"`+strings.Repeat("n", 17000)+`"`, 1)
+	for _, c := range []struct {
+		contentType, body, token string
+		svc                      *fakeTenantEvents
+		want                     int
+	}{
+		{"application/json", envelopeJSON("TenantCreated", "ACTIVE"), svcToken, &fakeTenantEvents{applied: true}, http.StatusCreated},
+		{"application/json", envelopeJSON("TenantInactivated", "INACTIVE"), svcToken, &fakeTenantEvents{applied: false}, http.StatusOK},
+		{"application/json", `{"eventId":`, svcToken, &fakeTenantEvents{}, http.StatusBadRequest},
+		{"application/json", envelopeJSON("TenantCreated", "ACTIVE"), svcToken, &fakeTenantEvents{err: tenantevent.ErrInvalid}, http.StatusBadRequest},
+		{"application/json", envelopeJSON("TenantCreated", "ACTIVE"), "", &fakeTenantEvents{}, http.StatusUnauthorized},
+		{"application/json", envelopeJSON("TenantCreated", "ACTIVE"), tokenWith(t, []string{"TENANT_ADMINISTRATOR"}, eventTenant, ""), &fakeTenantEvents{}, http.StatusForbidden},
+		{"text/plain", envelopeJSON("TenantCreated", "ACTIVE"), svcToken, &fakeTenantEvents{}, http.StatusUnsupportedMediaType},
+		{"application/json", bigEvent, svcToken, &fakeTenantEvents{}, http.StatusRequestEntityTooLarge},
+		{"application/json", envelopeJSON("TenantCreated", "ACTIVE"), svcToken, &fakeTenantEvents{err: errors.New("boom")}, http.StatusInternalServerError},
+		{"application/json", envelopeJSON("TenantCreated", "ACTIVE"), svcToken, &fakeTenantEvents{err: tenantevent.ErrRetryLater}, http.StatusServiceUnavailable},
+	} {
+		run(eventsHandler(c.svc, io.Discard), http.MethodPost, eventsPath, c.contentType, c.body, c.token, c.want)
 	}
 
 	for path, item := range doc.Paths.Map() {
