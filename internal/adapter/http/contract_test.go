@@ -38,19 +38,36 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 	type scenario struct {
 		method, path, contentType, body string
 		svc                             *fakeSignIn
+		refresh                         *fakeRefresh
 		want                            int
 	}
 	scenarios := []scenario{{method: http.MethodGet, path: "/health", want: http.StatusOK}}
 	for _, route := range []string{tenantRoute, platformRoute} {
 		scenarios = append(scenarios,
-			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{tokens: okTokens()}, http.StatusOK},
-			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: signin.ErrRefused}, http.StatusUnauthorized},
-			scenario{http.MethodPost, route, "application/json", `{"email":`, &fakeSignIn{}, http.StatusBadRequest},
-			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: signin.ErrInvalidRequest}, http.StatusBadRequest},
-			scenario{http.MethodPost, route, "text/plain", goodBody, &fakeSignIn{}, http.StatusUnsupportedMediaType},
-			scenario{http.MethodPost, route, "application/json", big, &fakeSignIn{}, http.StatusRequestEntityTooLarge},
-			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: errors.New("boom")}, http.StatusInternalServerError},
+			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{tokens: okTokens()}, nil, http.StatusOK},
+			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: signin.ErrRefused}, nil, http.StatusUnauthorized},
+			scenario{http.MethodPost, route, "application/json", `{"email":`, &fakeSignIn{}, nil, http.StatusBadRequest},
+			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: signin.ErrInvalidRequest}, nil, http.StatusBadRequest},
+			scenario{http.MethodPost, route, "text/plain", goodBody, &fakeSignIn{}, nil, http.StatusUnsupportedMediaType},
+			scenario{http.MethodPost, route, "application/json", big, &fakeSignIn{}, nil, http.StatusRequestEntityTooLarge},
+			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: errors.New("boom")}, nil, http.StatusInternalServerError},
 		)
+	}
+
+	bigRefresh := `{"refreshToken":"` + strings.Repeat("r", 4200) + `"}`
+	for _, r := range []struct {
+		contentType, body string
+		svc               *fakeRefresh
+		want              int
+	}{
+		{"application/json", refreshBody, &fakeRefresh{tokens: okTokens()}, http.StatusOK},
+		{"application/json", refreshBody, &fakeRefresh{err: signin.ErrRefused}, http.StatusUnauthorized},
+		{"application/json", `{"refreshToken":`, &fakeRefresh{}, http.StatusBadRequest},
+		{"text/plain", refreshBody, &fakeRefresh{}, http.StatusUnsupportedMediaType},
+		{"application/json", bigRefresh, &fakeRefresh{}, http.StatusRequestEntityTooLarge},
+		{"application/json", refreshBody, &fakeRefresh{err: errors.New("boom")}, http.StatusInternalServerError},
+	} {
+		scenarios = append(scenarios, scenario{method: http.MethodPost, path: refreshRoute, contentType: r.contentType, body: r.body, refresh: r.svc, want: r.want})
 	}
 
 	key := newKey(t)
@@ -59,6 +76,9 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		handler := newHandler(key)
 		if s.svc != nil {
 			handler = signInHandler(s.svc, io.Discard)
+		}
+		if s.refresh != nil {
+			handler = refreshHandler(s.refresh, io.Discard)
 		}
 		req := httptest.NewRequest(s.method, s.path, strings.NewReader(s.body))
 		if s.contentType != "" {
