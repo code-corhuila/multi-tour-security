@@ -104,6 +104,36 @@ paths:
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
+  /api/v1/security/public/sessions/refresh:
+    post:
+      summary: Renew the access token
+      description: >
+        The refresh token is opaque, single-use and lasts the 7 days of the session; a second use refuses the call and
+        revokes that session. The new token carries the roles of now, and a session of an account that was
+        inactivated, had its password changed, was signed out everywhere or belongs to a tenant that is not active
+        cannot be renewed. Every refusal is the same 401.
+      operationId: refreshSession
+      tags: [Sessions]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/Session'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
 components:
   headers:
     CorrelationId:
@@ -172,6 +202,15 @@ components:
           type: string
           minLength: 1
           maxLength: 128
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      additionalProperties: false
+      properties:
+        refreshToken:
+          type: string
+          minLength: 20
+          maxLength: 256
     SessionResponse:
       type: object
       description: >

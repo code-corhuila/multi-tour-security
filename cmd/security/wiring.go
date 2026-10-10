@@ -9,6 +9,7 @@ import (
 	httpadapter "github.com/code-corhuila/multi-tour-security/internal/adapter/http"
 	jwtadapter "github.com/code-corhuila/multi-tour-security/internal/adapter/jwt"
 	"github.com/code-corhuila/multi-tour-security/internal/adapter/postgres"
+	"github.com/code-corhuila/multi-tour-security/internal/core/refresh"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -20,14 +21,13 @@ func buildHandler(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Han
 	if err != nil {
 		return nil, err
 	}
-	service := &signin.Service{
-		Tenants:   postgres.NewTenants(pool),
-		Accounts:  postgres.NewAccounts(pool),
-		Sessions:  postgres.NewSessions(pool),
-		Hasher:    bcryptadapter.Hasher{},
-		Signer:    jwtadapter.NewSigner(cfg.privateKey),
-		DummyHash: dummy,
-		Clock:     time.Now,
+	tenants, accounts, sessions := postgres.NewTenants(pool), postgres.NewAccounts(pool), postgres.NewSessions(pool)
+	signer := jwtadapter.NewSigner(cfg.privateKey)
+	signIn := &signin.Service{
+		Tenants: tenants, Accounts: accounts, Sessions: sessions, Hasher: bcryptadapter.Hasher{}, Signer: signer,
+		DummyHash: dummy, Clock: time.Now,
 	}
-	return httpadapter.New(httpadapter.NewVerifier(cfg.publicKey), logger, httpadapter.WithSignIn(service)), nil
+	renewal := &refresh.Service{Tenants: tenants, Accounts: accounts, Sessions: sessions, Signer: signer, Clock: time.Now}
+	return httpadapter.New(httpadapter.NewVerifier(cfg.publicKey), logger,
+		httpadapter.WithSignIn(signIn), httpadapter.WithRefresh(renewal)), nil
 }

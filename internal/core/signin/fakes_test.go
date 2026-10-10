@@ -35,6 +35,10 @@ func (f *fakeTenants) FindByIdentifier(_ context.Context, identifier string) (te
 	return c, ok, f.err
 }
 
+func (f *fakeTenants) FindByID(context.Context, string) (tenant.Copy, bool, error) {
+	return tenant.Copy{}, false, nil
+}
+
 type fakeAccounts struct {
 	byKey     map[string]account.Account // tenantID + "|" + e-mail
 	roles     map[string][]string
