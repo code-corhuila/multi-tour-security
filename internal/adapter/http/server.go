@@ -32,12 +32,20 @@ type TokenVerifier interface {
 	Verify(raw string) (Claims, error)
 }
 
-// New builds the handler of the service. Every route except /health requires a valid token; a new
-// route is registered here and wrapped with protect.
-func New(verifier TokenVerifier, logger *slog.Logger) http.Handler {
+// New builds the handler of the service. Every route except /health and the public routes of an option requires a
+// valid token; a new route is registered here and wrapped with protect.
+func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Handler {
 	s := &server{verifier: verifier, logger: logger}
+	for _, option := range options {
+		option(s)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
+	if s.signIn != nil {
+		// public by design: a person who signs in has no token yet
+		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/sessions", s.signInTenant)
+		mux.HandleFunc("POST /api/v1/security/public/platform/sessions", s.signInPlatform)
+	}
 	mux.Handle("/", s.protect(http.HandlerFunc(s.notFound)))
 	return s.correlate(mux)
 }
@@ -45,6 +53,7 @@ func New(verifier TokenVerifier, logger *slog.Logger) http.Handler {
 type server struct {
 	verifier TokenVerifier
 	logger   *slog.Logger
+	signIn   SignInService
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
