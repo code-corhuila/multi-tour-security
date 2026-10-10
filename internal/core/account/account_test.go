@@ -127,3 +127,63 @@ func TestD_OnlyThePlatformAdministratorHasNoTenant(t *testing.T) {
 		t.Fatal("an account without tenant is the platform's, and one with a tenant is not")
 	}
 }
+
+func blockedAt(t *testing.T) account.Account {
+	t.Helper()
+	a := active()
+	var blocked bool
+	for i := 0; i < 5; i++ {
+		a, blocked = a.AfterFailure(start.Add(time.Duration(i) * 3 * time.Minute))
+	}
+	if !blocked {
+		t.Fatal("the account was not blocked by the fifth failure")
+	}
+	return a
+}
+
+func TestD_AFailureWhileBlockedDoesNotLiftTheBlockEarly(t *testing.T) {
+	a := blockedAt(t) // the fifth failure is at 12 minutes, so the block ends at 27
+	again, blocked := a.AfterFailure(start.Add(16 * time.Minute))
+	if blocked || again != a {
+		t.Fatalf("a failure while blocked must change nothing and report nothing: %+v blocked=%v", again, blocked)
+	}
+	if err := again.CanAuthenticate(start.Add(17 * time.Minute)); !errors.Is(err, account.ErrBlocked) {
+		t.Fatalf("the block was lifted by a later failure: %v", err)
+	}
+}
+
+func TestD_AFailureWhileBlockedDoesNotExtendTheBlock(t *testing.T) {
+	a := blockedAt(t)
+	until := a.BlockedUntil
+	a, blocked := a.AfterFailure(start.Add(20 * time.Minute))
+	if blocked || !a.BlockedUntil.Equal(until) {
+		t.Fatalf("the block moved from %v to %v (reported %v)", until, a.BlockedUntil, blocked)
+	}
+}
+
+func TestD_ASuccessLiftsABlockAndTheExactInstantsOfThe72HoursAreFixed(t *testing.T) {
+	if err := blockedAt(t).AfterSuccess().CanAuthenticate(start.Add(13 * time.Minute)); err != nil {
+		t.Fatalf("a success must lift the block: %v", err)
+	}
+	a := account.NewWithTemporaryCredential("a1", "t1", "ana@example.com", "hash", start)
+	exact := start.Add(account.TemporaryCredentialLife)
+	if a.UsesTemporaryCredential(exact) || !errors.Is(a.CanAuthenticate(exact), account.ErrTemporaryExpired) {
+		t.Fatal("the credential must be expired at exactly 72 hours")
+	}
+	if !a.UsesTemporaryCredential(exact.Add(-time.Nanosecond)) {
+		t.Fatal("the credential must still work one instant before the 72 hours")
+	}
+}
+
+func TestD_TheRefusalsComeInTheOrderInactiveBlockedExpired(t *testing.T) {
+	a := account.NewWithTemporaryCredential("a1", "t1", "ana@example.com", "hash", start)
+	a.BlockedUntil = start.Add(100 * time.Hour)
+	late := start.Add(80 * time.Hour)
+	if err := a.CanAuthenticate(late); !errors.Is(err, account.ErrBlocked) {
+		t.Fatalf("blocked must come before expired: %v", err)
+	}
+	a.Status = account.Inactive
+	if err := a.CanAuthenticate(late); !errors.Is(err, account.ErrInactive) {
+		t.Fatalf("inactive must come first: %v", err)
+	}
+}
