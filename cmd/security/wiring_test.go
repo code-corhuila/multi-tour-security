@@ -58,6 +58,7 @@ type stack struct {
 	pool    *pgxpool.Pool
 	logs    *bytes.Buffer
 	public  *rsa.PublicKey
+	private *rsa.PrivateKey
 }
 
 func newStack(t *testing.T) *stack {
@@ -78,7 +79,7 @@ func newStack(t *testing.T) *stack {
 			t.Fatal(err)
 		}
 	}
-	return &stack{handler: handler, pool: pool, logs: logs, public: &key.PublicKey}
+	return &stack{handler: handler, pool: pool, logs: logs, public: &key.PublicKey, private: key}
 }
 
 func (s *stack) account(t *testing.T, tenantID, email string, o pgtest.Options, roles ...string) string {

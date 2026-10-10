@@ -172,7 +172,115 @@ paths:
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
+  /api/v1/security/internal/outbox:
+    get:
+      summary: Read the events waiting
+      description: >
+        The pending events that are due, across tenants, the one due for longest first (then the one that happened
+        first), with the listing envelope. Never routed by the gateway. Requires the role SERVICE and nothing else: no
+        tenant, no other role, no access mark.
+      operationId: listOutboxEvents
+      tags: [Internal]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: status
+          in: query
+          schema: {type: string, enum: [PENDING], default: PENDING}
+      responses:
+        "200":
+          description: The events waiting
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxPage'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/internal/outbox/{eventId}/published:
+    post:
+      summary: Mark an event delivered
+      description: >
+        Only after every consumer answered 201 or 200. A repeat answers 200 with the event as it is, and an event that
+        had been given up is published all the same: a delivery that did succeed is true. Requires the role SERVICE.
+      operationId: markOutboxEventPublished
+      tags: [Internal]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/EventIdPath'
+      responses:
+        "200":
+          $ref: '#/components/responses/OutboxEvent'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/internal/outbox/{eventId}/attempts:
+    post:
+      summary: Record a failed delivery
+      description: >
+        Counts the attempt, keeps the error and moves nextAttemptAt (5 s doubling to 15 min); the 20th attempt marks
+        the event failed. An event that is no longer pending is not touched by a report that came late. Requires the
+        role SERVICE.
+      operationId: recordOutboxEventAttempt
+      tags: [Internal]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/EventIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OutboxAttemptRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/OutboxEvent'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
 components:
+  parameters:
+    EventIdPath:
+      name: eventId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   securitySchemes:
     bearerAuth:
       type: http
@@ -196,6 +304,17 @@ components:
         type: string
         enum: [Bearer]
   responses:
+    OutboxEvent:
+      description: The event as it is now
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OutboxEvent'
     Session:
       description: Signed in
       headers:
@@ -254,6 +373,49 @@ components:
           type: string
           minLength: 20
           maxLength: 256
+    OutboxEvent:
+      type: object
+      description: An event waiting to be delivered, with the envelope of ADR-004 D4; dates are RFC 3339 in UTC
+      required: [eventId, eventType, eventVersion, aggregateId, payload, correlationId, occurredAt, status, attempts, nextAttemptAt]
+      properties:
+        eventId: {type: string, format: uuid}
+        eventType: {type: string, example: AccountSessionsRevoked}
+        eventVersion: {type: integer, minimum: 1}
+        tenantId: {type: string, format: uuid, description: Absent for the events of the Platform Administrator}
+        aggregateId: {type: string, format: uuid}
+        payload: {type: object}
+        correlationId: {type: string}
+        occurredAt: {type: string, format: date-time}
+        publishedAt: {type: string, format: date-time}
+        status: {type: string, enum: [PENDING, PUBLISHED, FAILED]}
+        attempts: {type: integer, minimum: 0}
+        lastError: {type: string}
+        nextAttemptAt: {type: string, format: date-time}
+    OutboxPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutboxEvent'
+        meta:
+          type: object
+          required: [page, limit, total, totalPages]
+          properties:
+            page: {type: integer, minimum: 1}
+            limit: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, minimum: 0}
+            totalPages: {type: integer, minimum: 0}
+    OutboxAttemptRequest:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: string
+          minLength: 1
+          maxLength: 1000
     ChangePasswordRequest:
       type: object
       required: [newPassword]
@@ -288,7 +450,7 @@ components:
       properties:
         error:
           type: string
-          enum: [VALIDATION_ERROR, UNAUTHORIZED, NOT_FOUND, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, INTERNAL_ERROR]
+          enum: [VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, INTERNAL_ERROR]
         message:
           type: string
         traceId:
