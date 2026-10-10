@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -21,6 +22,14 @@ const ValidHash = "$2a$12$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234"
 // Open creates a throwaway database from TEST_DATABASE_URL, applies the DDL and returns a pool on it. The test is
 // skipped when the variable is not set; the CI sets it.
 func Open(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	pool, _ := OpenURL(t)
+	return pool
+}
+
+// OpenURL is Open that also gives the connection URL of the throwaway database, for what starts its own connection (a
+// command of the service).
+func OpenURL(t *testing.T) (*pgxpool.Pool, string) {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
 	if url == "" {
@@ -68,7 +77,12 @@ func Open(t *testing.T) *pgxpool.Pool {
 			t.Fatalf("%s: %v", file, err)
 		}
 	}
-	return pool
+	own, err := neturl.Parse(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	own.Path = "/" + name
+	return pool, own.String()
 }
 
 // ddlFiles lists the SQL of db/01_ddl in the order of the migrations: by folder, then by file name.
