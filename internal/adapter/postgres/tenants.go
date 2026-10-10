@@ -3,11 +3,13 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -35,6 +37,11 @@ func (r *Tenants) Apply(ctx context.Context, c tenant.Copy) (bool, error) {
 		return false, errors.New("an event of a tenant has the instant it happened")
 	}
 	tag, err := r.pool.Exec(ctx, applyTenant, c.TenantID, c.Identifier, string(c.Status), c.OccurredAt.Truncate(time.Microsecond))
+	var pg *pgconn.PgError
+	if errors.As(err, &pg) && pg.Code == "23505" { // unique_violation: the identifier is unique, and the tenant id is handled by ON CONFLICT
+		// another tenant holds the identifier; the driver's error stays reachable for the log
+		err = fmt.Errorf("%w: %w", port.ErrIdentifierTaken, err)
+	}
 	return err == nil && tag.RowsAffected() == 1, err
 }
 

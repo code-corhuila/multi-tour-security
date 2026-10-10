@@ -69,12 +69,20 @@ func (s *server) signInWith(w http.ResponseWriter, r *http.Request, identifier s
 // readJSON reads the body of a public route strictly and answers the error itself when it cannot: only
 // application/json, 4 KB at most (judged by what arrives, so a chunked body too), one document and no unknown field.
 func readJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	return readJSONWith(w, r, dst, maxSignInBody, true)
+}
+
+// readJSONWith is readJSON with the limit of the route and the choice to tolerate fields it does not name, which an
+// envelope of another service needs (it grows without asking).
+func readJSONWith(w http.ResponseWriter, r *http.Request, dst any, limit int64, strict bool) bool {
 	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err != nil || mediaType != "application/json" {
 		writeError(w, r, http.StatusUnsupportedMediaType, "UNSUPPORTED_MEDIA_TYPE", "the body must be application/json")
 		return false
 	}
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxSignInBody))
-	decoder.DisallowUnknownFields()
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
+	if strict {
+		decoder.DisallowUnknownFields()
+	}
 	err := decoder.Decode(dst)
 	if err == nil {
 		// one document and nothing after it
@@ -87,7 +95,7 @@ func readJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeError(w, r, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "the body is larger than 4 KB")
+			writeError(w, r, http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "the body is larger than the limit of the route")
 			return false
 		}
 		writeError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "the body must be a JSON object with the fields of the contract")
