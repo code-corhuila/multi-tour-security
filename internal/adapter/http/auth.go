@@ -16,6 +16,10 @@ var errMissingSubject = errors.New("token has no subject")
 // Claims is what the rest of the service may know about the caller.
 type Claims struct {
 	Subject string
+	// TenantID is empty for the platform and for a service; Access is the mark of a token that serves one purpose
+	// only ("password-change", "restricted") and empty for an ordinary one.
+	TenantID string
+	Access   string
 }
 
 // Verifier validates the access tokens of this service with the public key only: no service
@@ -45,5 +49,10 @@ func (v *Verifier) Verify(raw string) (Claims, error) {
 	if err != nil || subject == "" {
 		return Claims{}, errMissingSubject
 	}
-	return Claims{Subject: subject}, nil
+	claims := Claims{Subject: subject}
+	if body, ok := token.Claims.(jwt.MapClaims); ok {
+		claims.TenantID, _ = body["tenantId"].(string)
+		claims.Access, _ = body["access"].(string)
+	}
+	return claims, nil
 }

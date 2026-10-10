@@ -30,6 +30,9 @@ func (Hasher) Compare(hash, password string) bool {
 	return matched && len(password) <= maxBytes
 }
 
+// Hash makes the hash to store for a password, so that Hasher satisfies port.Hasher.
+func (Hasher) Hash(password string) (string, error) { return Hash(password) }
+
 // Hash makes the hash to store for a password of 1 to 72 bytes.
 func Hash(password string) (string, error) {
 	if password == "" {

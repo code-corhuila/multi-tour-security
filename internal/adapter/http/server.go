@@ -21,6 +21,9 @@ var validCorrelationID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 
 type contextKey struct{}
 
+// claimsKey carries the claims of the verified token to the handler of a protected route.
+type claimsKey struct{}
+
 type errorBody struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
@@ -41,6 +44,9 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
+	if s.change != nil {
+		mux.Handle("PUT /api/v1/security/sessions/password", s.protect(http.HandlerFunc(s.changePassword)))
+	}
 	if s.refresh != nil {
 		mux.HandleFunc("POST /api/v1/security/public/sessions/refresh", s.renew)
 	}
@@ -58,6 +64,7 @@ type server struct {
 	logger   *slog.Logger
 	signIn   SignInService
 	refresh  RefreshService
+	change   ChangePasswordService
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
@@ -77,13 +84,14 @@ func (s *server) protect(next http.Handler) http.Handler {
 			writeError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication is required")
 			return
 		}
-		if _, err := s.verifier.Verify(raw); err != nil {
+		claims, err := s.verifier.Verify(raw)
+		if err != nil {
 			// the reason goes to the log with the trace id, never to the caller
 			s.logger.WarnContext(r.Context(), "token rejected", "traceId", traceID(r.Context()), "reason", err.Error())
 			writeError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication is required")
 			return
 		}
-		next.ServeHTTP(w, r)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), claimsKey{}, claims)))
 	})
 }
 

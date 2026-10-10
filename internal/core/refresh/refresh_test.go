@@ -59,6 +59,9 @@ func (f *fakeAccounts) RecordFailure(context.Context, string, time.Time, string)
 	return account.Account{}, false, nil
 }
 func (f *fakeAccounts) RecordSuccess(context.Context, string) error { return nil }
+func (f *fakeAccounts) ChangePassword(context.Context, string, string, time.Time, string) error {
+	return errors.New("not used by renewal")
+}
 func (f *fakeAccounts) RolesOf(_ context.Context, id string) ([]string, error) {
 	return f.roles[id], f.rolesErr
 }

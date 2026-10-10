@@ -134,7 +134,50 @@ paths:
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
+  /api/v1/security/sessions/password:
+    put:
+      summary: Choose the own password
+      description: >
+        Only the token of a temporary credential (access password-change) is accepted, and only while the temporary
+        credential is in force. The password follows the policy of 00-governance/security-policy.md (8 characters or
+        more with an upper-case letter, a lower-case letter, a number and a special character, not a common one)
+        and is at most 72 bytes, the limit of bcrypt; it differs from the temporary one. The temporary state and the
+        failed sign-ins are cleared, older sessions of the account are cut off, and AccountSessionsRevoked waits in
+        the outbox. Every other token, and a credential that cannot be changed, is the same 401.
+      operationId: changeOwnPassword
+      tags: [Sessions]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        "204":
+          description: Password changed
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   headers:
     CorrelationId:
       description: The correlation id of the request, reused when it is safe and generated otherwise; it is the traceId of an error
@@ -211,6 +254,16 @@ components:
           type: string
           minLength: 20
           maxLength: 256
+    ChangePasswordRequest:
+      type: object
+      required: [newPassword]
+      additionalProperties: false
+      properties:
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 72
+          description: At most 72 bytes, which the policy checks; the design contract says 128 characters
     SessionResponse:
       type: object
       description: >
