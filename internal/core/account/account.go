@@ -61,6 +61,22 @@ func NormalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
+// ValidEmail tells whether a normalized e-mail is one the service accepts, at sign-in and for the first Administrator:
+// 3 to 254 plain ASCII characters with no space or control character and one @ that is neither first nor last. It is
+// the rule of the service, not of 06-data, where it is still open (spec section 6).
+func ValidEmail(email string) bool {
+	if len(email) < 3 || len(email) > 254 {
+		return false
+	}
+	for i := 0; i < len(email); i++ {
+		if email[i] <= 0x20 || email[i] >= 0x7f {
+			return false
+		}
+	}
+	at := strings.IndexByte(email, '@')
+	return at >= 1 && at != len(email)-1
+}
+
 // IsPlatform tells the account of the Platform Administrator, the only one with no tenant.
 func (a Account) IsPlatform() bool { return a.TenantID == "" }
 

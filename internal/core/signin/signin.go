@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -29,8 +28,6 @@ var (
 const (
 	tenantAdministrator   = "TENANT_ADMINISTRATOR"
 	platformAdministrator = "PLATFORM_ADMINISTRATOR"
-	maxEmail              = 254
-	minEmail              = 3
 	maxPassword           = 128
 	maxCorrelationID      = 128
 )
@@ -165,20 +162,12 @@ func (s *Service) signIn(ctx context.Context, r Request, platform bool) (Tokens,
 // which is all the service accepts as an address (the rule of 06-data is open, spec section 6).
 func validate(r Request) (string, bool) {
 	email := account.NormalizeEmail(r.Email)
-	if len(email) < minEmail || len(email) > maxEmail {
+	if !account.ValidEmail(email) {
 		return "", false
-	}
-	for i := 0; i < len(email); i++ {
-		if email[i] <= 0x20 || email[i] >= 0x7f {
-			return "", false
-		}
 	}
 	// the correlation id is written with a failure and with the event of a block: one that cannot be stored must be
 	// refused for everyone, or the answer would tell which accounts exist
 	if len(r.CorrelationID) < 1 || len(r.CorrelationID) > maxCorrelationID {
-		return "", false
-	}
-	if at := strings.IndexByte(email, '@'); at < 1 || at == len(email)-1 {
 		return "", false
 	}
 	// bcrypt reads 72 bytes at most: the password policy of HU-SEC-002 caps new passwords there, and a longer one

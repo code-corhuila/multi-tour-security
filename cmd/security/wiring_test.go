@@ -63,7 +63,12 @@ type stack struct {
 
 func newStack(t *testing.T) *stack {
 	t.Helper()
-	pool := pgtest.Open(t)
+	return newStackOn(t, pgtest.Open(t))
+}
+
+// newStackOn is newStack on a database the test already has, for what must share it with a command.
+func newStackOn(t *testing.T, pool *pgxpool.Pool) *stack {
+	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
