@@ -37,7 +37,7 @@ func TestD_EveryRuleOfThePolicyRefusesItsOwnViolation(t *testing.T) {
 }
 
 func TestD_ACommonPasswordIsRefusedWhateverItsCase(t *testing.T) {
-	for _, common := range []string{"Password1!", "password1!", "PASSWORD1!", "Welcome123!", "Qwerty123!", "P@ssw0rd"} {
+	for _, common := range []string{"Password1!", "password1!", "PASSWORD1!", "Welcome123!", "Qwerty123!", "P@ssw0rd", "123456aA!"} {
 		if err := password.Check(common); err == nil {
 			t.Errorf("the common password %q was accepted", common)
 		}
