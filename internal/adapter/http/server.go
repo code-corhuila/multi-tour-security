@@ -50,6 +50,9 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 		mux.Handle("POST /api/v1/security/internal/outbox/{eventId}/published", internal(s.markPublished))
 		mux.Handle("POST /api/v1/security/internal/outbox/{eventId}/attempts", internal(s.recordAttempt))
 	}
+	if s.tenantEvents != nil {
+		mux.Handle("POST /api/v1/security/internal/tenants/{tenantId}/events", s.protect(s.requireService(http.HandlerFunc(s.receiveTenantEvent))))
+	}
 	if s.change != nil {
 		mux.Handle("PUT /api/v1/security/sessions/password", s.protect(http.HandlerFunc(s.changePassword)))
 	}
@@ -72,6 +75,8 @@ type server struct {
 	refresh  RefreshService
 	change   ChangePasswordService
 	outbox   OutboxService
+
+	tenantEvents TenantEventService
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {

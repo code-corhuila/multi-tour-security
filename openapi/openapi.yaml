@@ -272,6 +272,78 @@ paths:
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
+  /api/v1/security/internal/tenants/{tenantId}/events:
+    post:
+      summary: Receive an event about a tenant
+      description: >
+        Job 7 delivers TenantCreated, TenantInactivated and TenantReactivated of identity-audit, each with the full
+        new state of the tenant in its payload (the service reads identifier and tenantStatus). The Idempotency-Key is
+        the id of the event. The copy of the tenant takes the state of an event only when it is strictly newer than
+        the one it holds: an older event, or a repeat, answers 200 and changes nothing. An identifier that another
+        tenant still holds answers 503 with Retry-After, because it goes away when the event that renames that tenant
+        arrives. Requires the role SERVICE and nothing else. The body is tolerant of fields it does not name, up to
+        16 KB.
+      operationId: receiveTenantEvent
+      tags: [Internal]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: The id of the event, as the body says it
+          schema: {type: string, minLength: 8, maxLength: 128}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantEventEnvelope'
+      responses:
+        "201":
+          description: The event was applied
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "200":
+          description: The event changed nothing, because it was already received or an older one
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+        "503":
+          description: The identifier is held by another tenant for now; deliver the event again
+          headers:
+            Retry-After:
+              required: true
+              schema: {type: string}
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   parameters:
     EventIdPath:
@@ -373,6 +445,26 @@ components:
           type: string
           minLength: 20
           maxLength: 256
+    TenantEventEnvelope:
+      type: object
+      description: The envelope of ADR-004 D4 as job 7 delivers it; fields it does not name are tolerated
+      required: [eventId, eventType, eventVersion, tenantId, aggregateId, payload, occurredAt]
+      properties:
+        eventId: {type: string, format: uuid}
+        eventType: {type: string, enum: [TenantCreated, TenantInactivated, TenantReactivated]}
+        eventVersion: {type: integer, minimum: 1}
+        tenantId: {type: string, format: uuid}
+        aggregateId: {type: string, format: uuid}
+        payload:
+          type: object
+          description: The full new state of the tenant; the service reads identifier and tenantStatus
+          required: [identifier, tenantStatus]
+          properties:
+            tenantId: {type: string, format: uuid}
+            identifier: {type: string, minLength: 3, maxLength: 40, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'}
+            tenantStatus: {type: string, enum: [PENDING, ACTIVE, INACTIVE, FAILED]}
+        correlationId: {type: string}
+        occurredAt: {type: string, format: date-time}
     OutboxEvent:
       type: object
       description: An event waiting to be delivered, with the envelope of ADR-004 D4; dates are RFC 3339 in UTC
@@ -450,7 +542,7 @@ components:
       properties:
         error:
           type: string
-          enum: [VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, INTERNAL_ERROR]
+          enum: [VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, SERVICE_UNAVAILABLE, INTERNAL_ERROR]
         message:
           type: string
         traceId:

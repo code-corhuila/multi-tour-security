@@ -2,9 +2,13 @@ package port
 
 import (
 	"context"
+	"errors"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenant"
 )
+
+// ErrIdentifierTaken is an event for a tenant whose identifier another tenant still holds.
+var ErrIdentifierTaken = errors.New("the identifier is held by another tenant")
 
 // Tenants keeps the copy of the tenants.
 type Tenants interface {
