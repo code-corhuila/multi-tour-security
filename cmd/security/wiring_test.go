@@ -176,33 +176,43 @@ func TestC_EveryRefusalIsTheSame401WhateverTheCause(t *testing.T) {
 		"expired temporary":    s.signIn(tenantURL, "old@example.com", password),
 		"platform with tenant": s.signIn(rootURL, "ana@example.com", password),
 	}
-	var want string
+	// the same body for every cause, and it is the expected envelope: the request id is the same in all of them
+	want := `{"error":"UNAUTHORIZED","message":"authentication failed","traceId":"e2e-1"}` + "\n"
 	for name, rec := range refusals {
-		if rec.Code != http.StatusUnauthorized {
-			t.Errorf("%s: %d", name, rec.Code)
+		if rec.Code != http.StatusUnauthorized || rec.Body.String() != want {
+			t.Errorf("%s answered %d %s, want 401 %s", name, rec.Code, rec.Body, want)
 		}
-		if want == "" {
-			want = rec.Body.String()
-		} else if rec.Body.String() != want {
-			t.Errorf("%s answered %s, others %s", name, rec.Body, want)
-		}
+	}
+	var accounts int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM security.identity WHERE email_normalized = 'old@example.com'`).Scan(&accounts); err != nil || accounts != 1 {
+		t.Errorf("an expired temporary credential leaves the account registered: %d %v", accounts, err)
 	}
 }
 
 func TestC_FiveWrongPasswordsBlockTheAccountAndTheRightOneIsThenRefusedLikeAnyOther(t *testing.T) {
 	s := newStack(t)
 	s.account(t, tenantA, "ana@example.com", pgtest.Options{}, "ANALYST")
+	s.account(t, tenantA, "bob@example.com", pgtest.Options{}, "ANALYST")
 	for i := 0; i < 5; i++ {
 		s.signIn(tenantURL, "ana@example.com", "wrong")
 	}
 	blocked := s.signIn(tenantURL, "ana@example.com", password)
 	unknown := s.signIn(tenantURL, "nobody@example.com", password)
-	if blocked.Code != http.StatusUnauthorized || blocked.Body.String() != unknown.Body.String() {
-		t.Fatalf("a blocked account is refused like an unknown one: %d %s", blocked.Code, blocked.Body)
+	wrong := s.signIn(tenantURL, "bob@example.com", "wrong")
+	if blocked.Code != http.StatusUnauthorized || blocked.Body.String() != unknown.Body.String() || blocked.Body.String() != wrong.Body.String() {
+		t.Fatalf("a blocked account is refused like an unknown one and like a wrong password: %d %s", blocked.Code, blocked.Body)
 	}
 	var events int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM security.outbox_event WHERE event_type = 'AccountBlocked'`).Scan(&events); err != nil || events != 1 {
+	var payload string
+	if err := s.pool.QueryRow(ctx, `SELECT count(*), coalesce(max(payload::text), '') FROM security.outbox_event
+		WHERE event_type = 'AccountBlocked'`).Scan(&events, &payload); err != nil || events != 1 {
 		t.Fatalf("the block leaves one event: %d %v", events, err)
+	}
+	if strings.Contains(payload, "ana@example.com") || strings.Contains(payload, "wrong") {
+		t.Fatalf("the event of the block carries a credential or an e-mail: %s", payload)
+	}
+	if rec := s.signIn(tenantURL, "bob@example.com", password); rec.Code != http.StatusOK {
+		t.Fatalf("the block is the account's: another account of the tenant still signs in, got %d", rec.Code)
 	}
 }
 
