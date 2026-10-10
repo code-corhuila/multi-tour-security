@@ -3,6 +3,7 @@ package token_test
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,7 +94,12 @@ func TestA_AServiceTokenLastsAtMostThirtyDaysAndAtLeastOneMinute(t *testing.T) {
 			t.Fatalf("life %v must be refused, got %v", life, err)
 		}
 	}
-	if _, err := token.Service("  ", time.Hour, now); err == nil {
-		t.Fatal("a service without a name must be refused")
+	for _, name := range []string{"", "  ", " padded", "padded ", strings.Repeat("s", 101), "bad\u0007name"} {
+		if _, err := token.Service(name, time.Hour, now); !errors.Is(err, token.ErrServiceName) {
+			t.Fatalf("the name %q must be refused, got %v", name, err)
+		}
+	}
+	if _, err := token.Service(strings.Repeat("s", 100), time.Hour, now); err != nil {
+		t.Fatalf("a name of 100 characters is allowed: %v", err)
 	}
 }
