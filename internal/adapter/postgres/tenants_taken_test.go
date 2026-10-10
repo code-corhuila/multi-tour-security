@@ -29,7 +29,7 @@ func TestI_AnIdentifierHeldByAnotherTenantIsTheErrorTheCallerCanRetry(t *testing
 	if _, err := tenants.Apply(ctx, takes); !errors.Is(err, port.ErrIdentifierTaken) {
 		t.Fatalf("on update: %v", err)
 	}
-	if _, err := tenants.Apply(ctx, copyAt("DELETED", 30)); errors.Is(err, port.ErrIdentifierTaken) {
-		t.Fatalf("a bad status is not a collision: %v", err)
+	if _, err := tenants.Apply(ctx, copyAt("DELETED", 30)); err == nil || errors.Is(err, port.ErrIdentifierTaken) || pgCode(err) != "23514" {
+		t.Fatalf("a bad status breaks its CHECK and is not a collision: %v", err)
 	}
 }

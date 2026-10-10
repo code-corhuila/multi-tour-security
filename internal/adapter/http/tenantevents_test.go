@@ -162,11 +162,26 @@ func TestC_TheAnswersOfTheUseCaseBecomeTheirStatusAndNoCauseIsShown(t *testing.T
 
 func TestC_LogsHoldNoPayloadOfAnEvent(t *testing.T) {
 	var logs bytes.Buffer
+	token := serviceBearer(t)
 	for _, err := range []error{nil, tenantevent.ErrInvalid, tenantevent.ErrRetryLater, errors.New("boom")} {
-		deliver(eventsHandler(&fakeTenantEvents{err: err}, &logs), serviceBearer(t), eventKey, "application/json", envelopeJSON("TenantCreated", "ACTIVE"))
+		deliver(eventsHandler(&fakeTenantEvents{err: err}, &logs), token, eventKey, "application/json", envelopeJSON("TenantCreated", "ACTIVE"))
 	}
-	if logs.Len() == 0 || strings.Contains(logs.String(), "Travesía") || strings.Contains(logs.String(), "payment overdue") {
-		t.Fatalf("the log must exist and hold nothing of the tenant: %s", logs.String())
+	for _, secret := range []string{"Travesía", "payment overdue", "travesia-natural", token} {
+		if strings.Contains(logs.String(), secret) {
+			t.Errorf("the log holds %q", secret)
+		}
+	}
+	if !strings.Contains(logs.String(), "held back") || !strings.Contains(logs.String(), eventKey) {
+		t.Fatalf("an event that stays held back is visible to the operator, by its id: %s", logs.String())
+	}
+}
+
+func TestC_TheInstantMayCarryAnyOffsetAndTheVersionMustBeANumber(t *testing.T) {
+	zone := strings.Replace(envelopeJSON("TenantCreated", "ACTIVE"), "2026-10-10T10:00:00.5Z", "2026-10-10T05:00:00.5-05:00", 1)
+	svc := &fakeTenantEvents{applied: true}
+	if rec := deliver(eventsHandler(svc, io.Discard), serviceBearer(t), eventKey, "application/json", zone); rec.Code != http.StatusCreated ||
+		!svc.got[0].OccurredAt.Equal(time.Date(2026, 10, 10, 10, 0, 0, 500000000, time.UTC)) {
+		t.Fatalf("%d %+v", rec.Code, svc.got)
 	}
 }
 
