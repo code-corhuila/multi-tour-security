@@ -2,6 +2,7 @@ package httpadapter_test
 
 import (
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
@@ -22,10 +23,13 @@ func TestC_TheVerifierReadsTheTenantAndTheAccessMarkAndNothingElseGivesThemPower
 		{"password change", jwt.MapClaims{"sub": "a", "exp": exp, "tenantId": "t-1", "access": "password-change"}, httpadapter.Claims{Subject: "a", TenantID: "t-1", Access: "password-change"}},
 		{"platform", jwt.MapClaims{"sub": "root", "exp": exp}, httpadapter.Claims{Subject: "root"}},
 		{"values that are not strings", jwt.MapClaims{"sub": "a", "exp": exp, "tenantId": 7, "access": []string{"password-change"}}, httpadapter.Claims{Subject: "a"}},
+		{"a service", jwt.MapClaims{"sub": "w", "exp": exp, "roles": []string{"SERVICE"}}, httpadapter.Claims{Subject: "w", Roles: []string{"SERVICE"}}},
+		{"roles that are not all text", jwt.MapClaims{"sub": "w", "exp": exp, "roles": []any{"SERVICE", 5, nil}}, httpadapter.Claims{Subject: "w", Roles: []string{"SERVICE"}}},
+		{"roles that are not a list", jwt.MapClaims{"sub": "w", "exp": exp, "roles": "SERVICE"}, httpadapter.Claims{Subject: "w"}},
 	}
 	for _, c := range cases {
 		got, err := verifier.Verify(sign(t, jwt.SigningMethodRS256, key, c.claims))
-		if err != nil || got != c.want {
+		if err != nil || !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s: %+v %v, want %+v", c.name, got, err, c.want)
 		}
 	}
