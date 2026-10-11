@@ -8,6 +8,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/code-corhuila/multi-tour-security/internal/core/account"
+	"github.com/code-corhuila/multi-tour-security/internal/core/password"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 )
 
@@ -63,5 +65,85 @@ type Service struct {
 
 // Create makes the account, or returns the one the same key already made with created false and hashes nothing.
 func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool, error) {
-	return port.Registered{}, false, errors.New("not implemented")
+	if s.Tenants == nil || s.Accounts == nil || s.Registry == nil || s.Hasher == nil || s.Clock == nil {
+		return port.Registered{}, false, ErrNotWired
+	}
+	r, ok := rules[c.Kind]
+	if !ok {
+		return port.Registered{}, false, errors.New("the kind of account is not known")
+	}
+	if n := len(c.IdempotencyKey); n < 8 || n > 128 {
+		return port.Registered{}, false, refuse("idempotencyKey", errBadLength)
+	}
+	if c.TenantID == "" {
+		return port.Registered{}, false, refuse("tenantId", errMissing)
+	}
+	// the repeat is answered before the body is read, so a retry whose body changed still gets its first account
+	scope := r.scope + ":" + c.TenantID
+	if prior, found, err := s.Registry.FindKey(ctx, scope, c.IdempotencyKey); err != nil || found {
+		return prior, false, err
+	}
+
+	fullName, phone, role, err := profile(r, c)
+	if err != nil {
+		return port.Registered{}, false, err
+	}
+	if r.selfService && c.Password != c.Confirmation {
+		return port.Registered{}, false, refuse("passwordConfirmation", errMismatch)
+	}
+	if r.activeTenant {
+		if err := s.requireActiveTenant(ctx, c.TenantID); err != nil {
+			return port.Registered{}, false, err
+		}
+	}
+	// after the tenant: a form for a tenant that does not exist is not told about its password
+	if err := password.Check(c.Password); err != nil {
+		return port.Registered{}, false, refuse("password", err)
+	}
+	email := account.NormalizeEmail(c.Email)
+	if !account.ValidEmail(email) {
+		return port.Registered{}, false, refuse("email", errInvalid)
+	}
+	if _, taken, err := s.Accounts.FindByEmail(ctx, c.TenantID, email); err != nil || taken {
+		if err == nil {
+			err = port.ErrEmailTaken
+		}
+		return port.Registered{}, false, err
+	}
+	// the hash is the expensive step, so it comes after every refusal that costs nothing
+	hash, err := s.Hasher.Hash(c.Password)
+	if err != nil {
+		return port.Registered{}, false, err
+	}
+	n := port.NewAccount{TenantID: c.TenantID, EmailNormalized: email, PasswordHash: hash, FullName: fullName, Phone: phone,
+		Role: role, CreatedBy: r.createdBy}
+	if r.hasActor {
+		n.CreatedBy += "/" + c.Actor
+	}
+	if r.temporary {
+		n.TemporaryUntil = s.Clock().Add(account.TemporaryCredentialLife)
+	}
+	made, err := s.Registry.Create(ctx, n, scope, c.IdempotencyKey)
+	if errors.Is(err, port.ErrKeyTaken) {
+		// another request with the same key won the race: the answer is the repeat of its account
+		prior, found, ferr := s.Registry.FindKey(ctx, scope, c.IdempotencyKey)
+		if ferr == nil && !found {
+			ferr = errors.New("the idempotency key was taken and cannot be read")
+		}
+		return prior, false, ferr
+	}
+	return made, err == nil, err
+}
+
+func (s *Service) requireActiveTenant(ctx context.Context, tenantID string) error {
+	t, found, err := s.Tenants.FindByID(ctx, tenantID)
+	switch {
+	case err != nil:
+		return err
+	case !found:
+		return ErrTenantNotFound
+	case !t.IsActive():
+		return ErrTenantNotActive
+	}
+	return nil
 }
