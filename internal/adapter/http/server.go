@@ -28,6 +28,13 @@ type errorBody struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
 	TraceID string `json:"traceId"`
+	// Details names the invalid fields of a 400, never their values.
+	Details []fieldDetail `json:"details,omitempty"`
+}
+
+type fieldDetail struct {
+	Field   string `json:"field"`
+	Message string `json:"message"`
 }
 
 // TokenVerifier is what the adapter needs from the token check, so a test can replace it.
@@ -64,6 +71,10 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/sessions", s.signInTenant)
 		mux.HandleFunc("POST /api/v1/security/public/platform/sessions", s.signInPlatform)
 	}
+	if s.accounts != nil && s.accountTenants != nil {
+		// public by design: a person who has no account has no token
+		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/accounts", s.createCustomerAccount)
+	}
 	mux.Handle("/", s.protect(http.HandlerFunc(s.notFound)))
 	return s.correlate(mux)
 }
@@ -76,7 +87,9 @@ type server struct {
 	change   ChangePasswordService
 	outbox   OutboxService
 
-	tenantEvents TenantEventService
+	tenantEvents   TenantEventService
+	accounts       AccountCreator
+	accountTenants TenantFinder
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
@@ -134,11 +147,16 @@ func traceID(ctx context.Context) string {
 
 // writeError is the only place where an error becomes an HTTP answer.
 func writeError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
+	writeEnvelope(w, r, status, errorBody{Error: code, Message: message})
+}
+
+func writeEnvelope(w http.ResponseWriter, r *http.Request, status int, body errorBody) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	if status == http.StatusUnauthorized {
 		w.Header().Set("WWW-Authenticate", "Bearer")
 	}
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(errorBody{Error: code, Message: message, TraceID: traceID(r.Context())})
+	body.TraceID = traceID(r.Context())
+	_ = json.NewEncoder(w).Encode(body)
 }

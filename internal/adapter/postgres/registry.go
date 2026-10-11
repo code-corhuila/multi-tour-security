@@ -122,11 +122,11 @@ func uniqueViolation(err error, constraint string, as error) error {
 // min(role) is that role; it only picks one deterministically if another story gives an account more.
 func load(ctx context.Context, q rowQuerier, id string) (port.Registered, error) {
 	var reg port.Registered
-	a, err := scanAccount(q.QueryRow(ctx, `SELECT `+accountColumns+`, COALESCE(full_name, ''), COALESCE(phone, ''), email_verified, COALESCE(r.role, '')
+	a, err := scanAccount(q.QueryRow(ctx, `SELECT `+accountColumns+`, COALESCE(full_name, ''), COALESCE(phone, ''), email_verified, COALESCE(r.role, ''), created_at
 		FROM security.identity
 		LEFT JOIN LATERAL (SELECT min(mr.role) AS role FROM security.membership m
 			JOIN security.membership_role mr USING (membership_id) WHERE m.identity_id = identity.identity_id) r ON true
-		WHERE identity_id = $1::uuid`, id), &reg.FullName, &reg.Phone, &reg.EmailVerified, &reg.Role)
+		WHERE identity_id = $1::uuid`, id), &reg.FullName, &reg.Phone, &reg.EmailVerified, &reg.Role, &reg.CreatedAt)
 	reg.Account = a
 	if err != nil {
 		return port.Registered{}, err
