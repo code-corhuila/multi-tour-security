@@ -11,6 +11,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/adapter/postgres/pgtest"
 	"github.com/code-corhuila/multi-tour-security/internal/core/account"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -60,13 +61,60 @@ func TestI_KeyAndAccountAreWrittenInOneTransaction(t *testing.T) {
 	registry, pool := registrySetup(t)
 	bad := newAccount("ana@example.com")
 	bad.Role = "NOT_A_ROLE" // refused by the table after the identity and the membership were written
-	if _, err := registry.Create(ctx, bad, customerScope, "key-0001-abcd"); err == nil {
-		t.Fatal("an invalid role must be refused")
-	}
-	for _, table := range []string{"identity", "membership", "membership_role", "idempotency_key"} {
-		if n := rows(t, pool, table); n != 0 {
-			t.Errorf("%s kept %d rows of a refused account", table, n)
+	// a scope of 101 characters violates chk_idempotency_key_scope on the LAST statement, after the three other rows exist
+	long := strings.Repeat("s", 101)
+	for name, call := range map[string]func() error{
+		"role": func() error { _, err := registry.Create(ctx, bad, customerScope, "key-0001-abcd"); return err },
+		"key": func() error {
+			_, err := registry.Create(ctx, newAccount("ana@example.com"), long, "key-0001-abcd")
+			return err
+		},
+	} {
+		err := call()
+		if err == nil || errors.Is(err, port.ErrEmailTaken) || errors.Is(err, port.ErrKeyTaken) {
+			t.Fatalf("%s: want a plain refusal of the table, got %v", name, err)
 		}
+		for _, table := range []string{"identity", "membership", "membership_role", "idempotency_key"} {
+			if n := rows(t, pool, table); n != 0 {
+				t.Errorf("%s: %s kept %d rows of a refused account", name, table, n)
+			}
+		}
+	}
+}
+
+func TestI_ARepeatedKeyIsKeyTakenAndMakesNoSecondAccount(t *testing.T) {
+	registry, pool := registrySetup(t)
+	if _, err := registry.Create(ctx, newAccount("ana@example.com"), customerScope, "key-0001-abcd"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := registry.Create(ctx, newAccount("other@example.com"), customerScope, "key-0001-abcd"); !errors.Is(err, port.ErrKeyTaken) {
+		t.Fatalf("want ErrKeyTaken, got %v", err)
+	}
+	if n := rows(t, pool, "identity"); n != 1 {
+		t.Fatalf("%d accounts", n)
+	}
+}
+
+func TestI_AnAccountWithoutTenantIsRefusedBeforeAnySQL(t *testing.T) {
+	registry, pool := registrySetup(t)
+	n := newAccount("ana@example.com")
+	n.TenantID = ""
+	_, err := registry.Create(ctx, n, customerScope, "key-0001-abcd")
+	var pg *pgconn.PgError
+	if err == nil || errors.As(err, &pg) || rows(t, pool, "identity") != 0 {
+		t.Fatalf("want an error of the adapter and no row, got %v", err)
+	}
+}
+
+func TestI_TheCreatorIsRecordedWithTheMembership(t *testing.T) {
+	registry, pool := registrySetup(t)
+	made, err := registry.Create(ctx, newAccount("ana@example.com"), customerScope, "key-0001-abcd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var by string
+	if err := pool.QueryRow(ctx, `SELECT created_by FROM security.membership WHERE identity_id = $1::uuid`, made.Account.ID).Scan(&by); err != nil || by != "customer" {
+		t.Fatalf("created_by %q %v", by, err)
 	}
 }
 
@@ -110,13 +158,16 @@ func TestI_TwoRequestsWithTheSameKeyMakeOneAccountAndTheLoserGetsKeyTaken(t *tes
 	const workers = 8
 	errs := make([]error, workers)
 	var wg sync.WaitGroup
+	start := make(chan struct{}) // released at once so that the requests really overlap
 	for i := range errs {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			<-start
 			_, errs[i] = registry.Create(ctx, newAccount("ana@example.com"), customerScope, "key-0001-abcd")
 		}()
 	}
+	close(start)
 	wg.Wait()
 	wins := 0
 	for _, err := range errs {
@@ -166,8 +217,12 @@ func TestI_NoSecretIsStoredInClear(t *testing.T) {
 	}
 	// a clear password is refused by the shape of the column
 	n.EmailNormalized, n.PasswordHash = "bo@example.com", "Secret-Passw0rd!"
-	if _, err := registry.Create(ctx, n, customerScope, "key-0002-abcd"); err == nil || errors.Is(err, port.ErrEmailTaken) {
+	_, err := registry.Create(ctx, n, customerScope, "key-0002-abcd")
+	if err == nil || errors.Is(err, port.ErrEmailTaken) {
 		t.Fatalf("a clear password must be refused by the table, got %v", err)
+	}
+	if strings.Contains(err.Error(), "Secret-Passw0rd!") {
+		t.Fatalf("the error quotes the password: %v", err)
 	}
 }
 
