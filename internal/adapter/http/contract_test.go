@@ -15,7 +15,9 @@ import (
 	"github.com/getkin/kin-openapi/routers/legacy"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/changepassword"
+	"github.com/code-corhuila/multi-tour-security/internal/core/createaccount"
 	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
+	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenantevent"
 )
@@ -105,7 +107,7 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 			req.Header.Set("Content-Type", contentType)
 		}
 		req.Header.Set("X-Correlation-Id", "gate-1")
-		if strings.HasSuffix(path, "/events") {
+		if strings.HasSuffix(path, "/events") || strings.HasSuffix(path, "/accounts") {
 			req.Header.Set("Idempotency-Key", eventKey)
 		}
 		rec := httptest.NewRecorder()
@@ -195,6 +197,29 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		{"application/json", envelopeJSON("TenantCreated", "ACTIVE"), svcToken, &fakeTenantEvents{err: tenantevent.ErrRetryLater}, http.StatusServiceUnavailable},
 	} {
 		run(eventsHandler(c.svc, io.Discard), http.MethodPost, eventsPath, c.contentType, c.body, c.token, c.want)
+	}
+
+	// the account of a Final Customer: created, repeated, and every refusal the use case can give
+	bigAccount := `{"firstName":"` + strings.Repeat("a", 4200) + `"}`
+	known, unknown := &fakeTenantFinder{found: true}, &fakeTenantFinder{}
+	for _, c := range []struct {
+		contentType, body string
+		svc               *fakeCreator
+		tenants           *fakeTenantFinder
+		want              int
+	}{
+		{"application/json", customerBody, &fakeCreator{reg: registered(), created: true}, known, http.StatusCreated},
+		{"application/json", customerBody, &fakeCreator{reg: registered()}, known, http.StatusOK},
+		{"application/json", `{"firstName":`, &fakeCreator{}, known, http.StatusBadRequest},
+		{"application/json", customerBody, &fakeCreator{err: &createaccount.FieldError{Field: "password", Err: errors.New("weak")}}, known, http.StatusBadRequest},
+		{"application/json", customerBody, &fakeCreator{}, unknown, http.StatusNotFound},
+		{"application/json", customerBody, &fakeCreator{err: createaccount.ErrTenantNotFound}, known, http.StatusNotFound},
+		{"text/plain", customerBody, &fakeCreator{}, known, http.StatusUnsupportedMediaType},
+		{"application/json", bigAccount, &fakeCreator{}, known, http.StatusRequestEntityTooLarge},
+		{"application/json", customerBody, &fakeCreator{err: port.ErrEmailTaken}, known, http.StatusUnprocessableEntity},
+		{"application/json", customerBody, &fakeCreator{err: errors.New("boom")}, known, http.StatusInternalServerError},
+	} {
+		run(accountsHandler(c.svc, c.tenants, io.Discard), http.MethodPost, accountsRoute, c.contentType, c.body, "", c.want)
 	}
 
 	for path, item := range doc.Paths.Map() {

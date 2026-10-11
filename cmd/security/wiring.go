@@ -10,6 +10,7 @@ import (
 	jwtadapter "github.com/code-corhuila/multi-tour-security/internal/adapter/jwt"
 	"github.com/code-corhuila/multi-tour-security/internal/adapter/postgres"
 	"github.com/code-corhuila/multi-tour-security/internal/core/changepassword"
+	"github.com/code-corhuila/multi-tour-security/internal/core/createaccount"
 	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
 	"github.com/code-corhuila/multi-tour-security/internal/core/refresh"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
@@ -32,8 +33,11 @@ func buildHandler(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Han
 	}
 	renewal := &refresh.Service{Tenants: tenants, Accounts: accounts, Sessions: sessions, Signer: signer, Clock: time.Now}
 	firstPassword := &changepassword.Service{Accounts: accounts, Hasher: bcryptadapter.Hasher{}, Clock: time.Now}
+	newAccounts := &createaccount.Service{
+		Tenants: tenants, Accounts: accounts, Registry: postgres.NewRegistry(pool), Hasher: bcryptadapter.Hasher{}, Clock: time.Now,
+	}
 	events := &outbox.Service{Store: postgres.NewOutbox(pool), Clock: time.Now, Policy: outbox.DefaultPolicy}
 	return httpadapter.New(httpadapter.NewVerifier(cfg.publicKey), logger,
 		httpadapter.WithSignIn(signIn), httpadapter.WithRefresh(renewal), httpadapter.WithChangePassword(firstPassword),
-		httpadapter.WithOutbox(events), httpadapter.WithTenantEvents(&tenantevent.Service{Tenants: tenants})), nil
+		httpadapter.WithCreateAccount(newAccounts, tenants), httpadapter.WithOutbox(events), httpadapter.WithTenantEvents(&tenantevent.Service{Tenants: tenants})), nil
 }

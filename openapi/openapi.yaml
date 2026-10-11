@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Multitour security
-  version: 0.2.0
+  version: 0.3.0
   description: >
     The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
     (ADR-004 D7). It carries only the operations the service implements; every story adds its operations here
@@ -131,6 +131,55 @@ paths:
         "413":
           $ref: '#/components/responses/Error'
         "415":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/public/tenants/{identifier}/accounts:
+    post:
+      summary: Create a Final Customer account in the tenant of a link
+      description: >
+        A person creates the account of a Final Customer inside the tenant of the link /t/{identifier}: the tenant is
+        the one of the path and nothing in the body changes it. The account is created ACTIVE with the role
+        FINAL_CUSTOMER and an ordinary password. The e-mail is not verified yet (HU-SEC-003), so emailVerified is false
+        and the account can sign in all the same. The e-mail is lower-cased and trimmed; the same e-mail in another
+        tenant is another account, and in the same tenant it is refused with 422, also when the existing account is
+        inactive. A tenant that does not exist is 404; one that is not ACTIVE is 422 and creates nothing. A password that
+        breaks the policy or a confirmation that differs is 400 with the field in details. A repeat with the same
+        Idempotency-Key answers 200 with the account already created. The answer never carries a credential. A 422 for an e-mail already in use carries details naming the field email (message "already in use"); a 422 for a tenant that is not active carries no details.
+      operationId: createCustomerAccount
+      tags: [Accounts]
+      security: []
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          description: Identifier of the tenant, lowercase kebab-case
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 40
+            pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCustomerAccountRequest'
+      responses:
+        "201":
+          $ref: '#/components/responses/Account'
+        "200":
+          $ref: '#/components/responses/Account'
+        "400":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
@@ -346,6 +395,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
 components:
   parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: One value per intent, the same on every retry (8 to 128 characters)
+      schema: {type: string, minLength: 8, maxLength: 128}
     EventIdPath:
       name: eventId
       in: path
@@ -387,6 +442,17 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/OutboxEvent'
+    Account:
+      description: The account, created now (201) or by an earlier request with the same Idempotency-Key (200)
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AccountResponse'
     Session:
       description: Signed in
       headers:
@@ -518,6 +584,35 @@ components:
           minLength: 8
           maxLength: 72
           description: At most 72 bytes, which the policy checks; the design contract says 128 characters
+    CreateCustomerAccountRequest:
+      type: object
+      required: [firstName, lastName, email, phone, password, passwordConfirmation]
+      additionalProperties: false
+      properties:
+        firstName: {type: string, minLength: 1, maxLength: 50}
+        lastName: {type: string, minLength: 1, maxLength: 50}
+        email: {type: string, minLength: 3, maxLength: 254}
+        phone: {type: string, pattern: '^[0-9+() -]{7,20}$'}
+        password: {type: string, minLength: 8, maxLength: 72, description: "At most 72 bytes, which the policy checks"}
+        passwordConfirmation: {type: string, minLength: 1, maxLength: 72, description: Must match password}
+    AccountResponse:
+      type: object
+      description: An account of a tenant. Never carries a password, a hash or any credential.
+      required: [accountId, tenantId, email, roles, accountStatus, emailVerified, createdAt]
+      properties:
+        accountId: {type: string, format: uuid}
+        tenantId: {type: string, format: uuid}
+        fullName: {type: string}
+        email: {type: string, description: "The e-mail as normalized (lower case, no surrounding spaces)"}
+        phone: {type: string}
+        roles:
+          type: array
+          items:
+            type: string
+            enum: [FINAL_CUSTOMER, TENANT_ADMINISTRATOR, OPERATIONAL_COLLABORATOR, MANAGER, ACCOUNTANT, ANALYST]
+        accountStatus: {type: string, enum: [ACTIVE, INACTIVE]}
+        emailVerified: {type: boolean}
+        createdAt: {type: string, format: date-time}
     SessionResponse:
       type: object
       description: >
@@ -542,8 +637,16 @@ components:
       properties:
         error:
           type: string
-          enum: [VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, SERVICE_UNAVAILABLE, INTERNAL_ERROR]
+          enum: [VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, BUSINESS_RULE_VIOLATION, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, SERVICE_UNAVAILABLE, INTERNAL_ERROR]
         message:
           type: string
+        details:
+          type: array
+          description: One entry per invalid field with 400, and the field email with the 422 of an e-mail already in use
+          items:
+            type: object
+            properties:
+              field: {type: string}
+              message: {type: string}
         traceId:
           type: string
