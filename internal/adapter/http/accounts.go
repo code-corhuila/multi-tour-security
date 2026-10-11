@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -40,11 +41,17 @@ type customerBody struct {
 // createCustomerAccount takes the tenant from the link and nothing in the body can change it. A missing field arrives
 // empty and the use case refuses it by name, so the rules of the fields live in one place.
 func (s *server) createCustomerAccount(w http.ResponseWriter, r *http.Request) {
+	identifier := r.PathValue("identifier")
+	if !validIdentifier(identifier) {
+		// nothing that is not an identifier reaches the store
+		s.answerAccount(w, r, port.Registered{}, false, createaccount.ErrTenantNotFound)
+		return
+	}
 	var body customerBody
 	if !readJSON(w, r, &body) {
 		return
 	}
-	t, found, err := s.accountTenants.FindByIdentifier(r.Context(), r.PathValue("identifier"))
+	t, found, err := s.accountTenants.FindByIdentifier(r.Context(), identifier)
 	if err == nil && !found {
 		err = createaccount.ErrTenantNotFound
 	}
@@ -79,6 +86,10 @@ type accountBody struct {
 // goes to the log with the trace id and never to the caller.
 func (s *server) answerAccount(w http.ResponseWriter, r *http.Request, reg port.Registered, created bool, err error) {
 	var invalid *createaccount.FieldError
+	var out accountBody
+	if err == nil {
+		out, err = toAccountBody(reg)
+	}
 	switch {
 	case errors.As(err, &invalid):
 		writeEnvelope(w, r, http.StatusBadRequest, errorBody{Error: "VALIDATION_ERROR", Message: "the request is not valid",
@@ -92,7 +103,8 @@ func (s *server) answerAccount(w http.ResponseWriter, r *http.Request, reg port.
 		writeEnvelope(w, r, http.StatusUnprocessableEntity, errorBody{Error: "BUSINESS_RULE_VIOLATION",
 			Message: "the e-mail is already in use in this tenant", Details: []fieldDetail{{Field: "email", Message: "already in use"}}})
 	case err != nil:
-		s.logger.ErrorContext(r.Context(), "creating an account failed", "traceId", traceID(r.Context()), "reason", err.Error())
+		// only the type: the text of a driver error can quote the e-mail of the row that failed
+		s.logger.ErrorContext(r.Context(), "creating an account failed", "traceId", traceID(r.Context()), "errorType", fmt.Sprintf("%T", err))
 		writeError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "an internal error occurred")
 	default:
 		status := http.StatusOK
@@ -102,18 +114,24 @@ func (s *server) answerAccount(w http.ResponseWriter, r *http.Request, reg port.
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(status)
-		_ = json.NewEncoder(w).Encode(toAccountBody(reg))
+		_ = json.NewEncoder(w).Encode(out)
 	}
 }
 
-func toAccountBody(reg port.Registered) accountBody {
-	status := "ACTIVE"
-	if reg.Account.Status == account.Inactive {
+// toAccountBody refuses a status it does not know, so that a new one cannot be answered as if it were ACTIVE.
+func toAccountBody(reg port.Registered) (accountBody, error) {
+	var status string
+	switch reg.Account.Status {
+	case account.Active:
+		status = "ACTIVE"
+	case account.Inactive:
 		status = "INACTIVE"
+	default:
+		return accountBody{}, errors.New("the account has a status the contract does not know")
 	}
 	return accountBody{
 		AccountID: reg.Account.ID, TenantID: reg.Account.TenantID, FullName: reg.FullName, Email: reg.Account.EmailNormalized,
 		Phone: reg.Phone, Roles: []string{reg.Role}, AccountStatus: status, EmailVerified: reg.EmailVerified,
 		CreatedAt: reg.CreatedAt.UTC(),
-	}
+	}, nil
 }
