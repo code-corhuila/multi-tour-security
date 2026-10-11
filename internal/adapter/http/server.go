@@ -76,7 +76,9 @@ type server struct {
 	change   ChangePasswordService
 	outbox   OutboxService
 
-	tenantEvents TenantEventService
+	tenantEvents   TenantEventService
+	accounts       AccountCreator
+	accountTenants TenantFinder
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {

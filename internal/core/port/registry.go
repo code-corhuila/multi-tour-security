@@ -37,6 +37,7 @@ type Registered struct {
 	FullName      string
 	Phone         string
 	EmailVerified bool
+	CreatedAt     time.Time
 }
 
 // AccountRegistry is where the accounts of one story are created, and the memory of which key made which account.
