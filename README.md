@@ -26,7 +26,7 @@ Schema `security`, user `security_app` (it can write only there), in the instanc
 ## How to test it
 
 ```sh
-go test ./...                # unit, contract and import tests; no database needed
+go test ./...                # unit, contract and import tests; the persistence tests need TEST_DATABASE_URL and are skipped without it
 sh db/tests/db-ci.sh         # the schema from empty, rerun, rollback and rebuild; needs Docker
 ```
 
