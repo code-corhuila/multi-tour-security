@@ -145,7 +145,7 @@ paths:
         tenant is another account, and in the same tenant it is refused with 422, also when the existing account is
         inactive. A tenant that does not exist is 404; one that is not ACTIVE is 422 and creates nothing. A password that
         breaks the policy or a confirmation that differs is 400 with the field in details. A repeat with the same
-        Idempotency-Key answers 200 with the account already created. The answer never carries a credential.
+        Idempotency-Key answers 200 with the account already created. The answer never carries a credential. A 422 for an e-mail already in use carries details naming the field email (message "already in use"); a 422 for a tenant that is not active carries no details.
       operationId: createCustomerAccount
       tags: [Accounts]
       security: []

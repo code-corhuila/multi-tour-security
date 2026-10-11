@@ -136,7 +136,8 @@ func TestC_TheSameEmailInAnotherTenantIsAnotherAccountAndInTheSameTenantIsRefuse
 		f := customerFields()
 		f["email"] = email
 		rec := s.register(t, accountsURL, "customer-key-0003", f)
-		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "BUSINESS_RULE_VIOLATION") {
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "BUSINESS_RULE_VIOLATION") ||
+			!strings.Contains(rec.Body.String(), `"details":[{"field":"email","message":"already in use"}]`) {
 			t.Errorf("%s: %d %s", email, rec.Code, rec.Body)
 		}
 	}
@@ -228,7 +229,7 @@ func TestC_AnUnknownTenantIs404AndAnInactiveOneIs422AndNeitherCreatesAnything(t 
 		t.Fatal(err)
 	}
 	rec := s.register(t, otherAccount, "customer-key-0002", customerFields())
-	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "BUSINESS_RULE_VIOLATION") {
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "BUSINESS_RULE_VIOLATION") || strings.Contains(rec.Body.String(), "details") {
 		t.Fatalf("inactive: %d %s", rec.Code, rec.Body)
 	}
 	if n := s.accountCount(t); n != 0 {

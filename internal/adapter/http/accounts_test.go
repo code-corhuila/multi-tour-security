@@ -145,6 +145,13 @@ func TestC_EveryRefusalOfTheUseCaseIsTranslatedInOnePlace(t *testing.T) {
 		if c.code == 400 && (len(env.Details) != 1 || env.Details[0].Field != "password" || strings.Contains(rec.Body.String(), "Viaje-2026!")) {
 			t.Errorf("%s: details must name the field and never the value: %s", c.name, rec.Body)
 		}
+		// the portal tells a taken e-mail from an inactive tenant by the details of the 422
+		if c.name == "e-mail in use" && (len(env.Details) != 1 || env.Details[0].Field != "email" || env.Details[0].Message != "already in use") {
+			t.Errorf("%s: the 422 names the e-mail: %s", c.name, rec.Body)
+		}
+		if c.name == "tenant not active" && len(env.Details) != 0 {
+			t.Errorf("%s: the 422 of a tenant carries no details: %s", c.name, rec.Body)
+		}
 	}
 }
 
