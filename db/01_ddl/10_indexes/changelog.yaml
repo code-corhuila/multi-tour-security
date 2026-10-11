@@ -34,3 +34,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: security-ddl-indexes-003
+      author: Molina211
+      labels: "HU-SEC-002,ddl,indexes"
+      comment: "The index of the foreign key of the key table (HU-SEC-002, plan D-04)."
+      changes:
+        - sqlFile:
+            path: 003_create_idempotency_key_indexes.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/003_create_idempotency_key_indexes.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
