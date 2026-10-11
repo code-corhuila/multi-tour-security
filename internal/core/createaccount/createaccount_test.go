@@ -172,7 +172,7 @@ func TestA_TheThreeKindsShareOneUseCase(t *testing.T) {
 		consults  bool
 	}{
 		{"customer", customer(), "FINAL_CUSTOMER", false, "customer", "customer:" + tenantID, true},
-		{"internal user", internalUser(), "OPERATOR", true, "tenant-administrator/" + actorAdmin, "user:" + tenantID, true},
+		{"internal user", internalUser(), "OPERATIONAL_COLLABORATOR", true, "tenant-administrator/" + actorAdmin, "user:" + tenantID, true},
 		{"first administrator", firstAdministrator(), "TENANT_ADMINISTRATOR", true, "service/" + serviceSub, "first-admin:" + tenantID, false},
 	}
 	for _, tc := range cases {

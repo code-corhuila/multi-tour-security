@@ -16,8 +16,24 @@ type rule struct {
 	hasActor  bool
 }
 
-var rules = map[Kind]rule{
-	Customer:           {scope: "customer", role: "FINAL_CUSTOMER", selfService: true, activeTenant: true, createdBy: "customer"},
-	InternalUser:       {scope: "user", temporary: true, activeTenant: true, createdBy: "tenant-administrator", hasActor: true},
-	FirstAdministrator: {scope: "first-admin", role: "TENANT_ADMINISTRATOR", temporary: true, createdBy: "service", hasActor: true},
+// rules is the table as a function with a switch, so that nothing can change it at run time.
+func rules(k Kind) (rule, bool) {
+	switch k {
+	case Customer:
+		return rule{scope: "customer", role: "FINAL_CUSTOMER", selfService: true, activeTenant: true, createdBy: "customer"}, true
+	case InternalUser:
+		return rule{scope: "user", temporary: true, activeTenant: true, createdBy: "tenant-administrator", hasActor: true}, true
+	case FirstAdministrator:
+		return rule{scope: "first-admin", role: "TENANT_ADMINISTRATOR", temporary: true, createdBy: "service", hasActor: true}, true
+	}
+	return rule{}, false
+}
+
+// tenantRole tells whether a role is one that a person of a tenant can give another; a platform or customer role never is.
+func tenantRole(role string) bool {
+	switch role {
+	case "TENANT_ADMINISTRATOR", "OPERATIONAL_COLLABORATOR", "MANAGER", "ACCOUNTANT", "ANALYST":
+		return true
+	}
+	return false
 }

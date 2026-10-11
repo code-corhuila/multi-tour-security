@@ -125,7 +125,7 @@ func customer() createaccount.Command {
 
 func internalUser() createaccount.Command {
 	return createaccount.Command{Kind: createaccount.InternalUser, TenantID: tenantID, FullName: "Luis Gómez",
-		Email: "luis@example.com", Password: goodPass, Role: "OPERATOR", Actor: actorAdmin, IdempotencyKey: idemKey}
+		Email: "luis@example.com", Password: goodPass, Role: "OPERATIONAL_COLLABORATOR", Actor: actorAdmin, IdempotencyKey: idemKey}
 }
 
 func firstAdministrator() createaccount.Command {

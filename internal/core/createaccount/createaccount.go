@@ -6,6 +6,7 @@ package createaccount
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/account"
@@ -68,7 +69,7 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 	if s.Tenants == nil || s.Accounts == nil || s.Registry == nil || s.Hasher == nil || s.Clock == nil {
 		return port.Registered{}, false, ErrNotWired
 	}
-	r, ok := rules[c.Kind]
+	r, ok := rules(c.Kind)
 	if !ok {
 		return port.Registered{}, false, errors.New("the kind of account is not known")
 	}
@@ -81,7 +82,7 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 	// the repeat is answered before the body is read, so a retry whose body changed still gets its first account
 	scope := r.scope + ":" + c.TenantID
 	if prior, found, err := s.Registry.FindKey(ctx, scope, c.IdempotencyKey); err != nil || found {
-		return prior, false, err
+		return withoutHash(prior), false, err
 	}
 
 	fullName, phone, role, err := profile(r, c)
@@ -118,7 +119,7 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 	n := port.NewAccount{TenantID: c.TenantID, EmailNormalized: email, PasswordHash: hash, FullName: fullName, Phone: phone,
 		Role: role, CreatedBy: r.createdBy}
 	if r.hasActor {
-		n.CreatedBy += "/" + c.Actor
+		n.CreatedBy += "/" + strings.TrimSpace(c.Actor)
 	}
 	if r.temporary {
 		n.TemporaryUntil = s.Clock().Add(account.TemporaryCredentialLife)
@@ -130,9 +131,15 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 		if ferr == nil && !found {
 			ferr = errors.New("the idempotency key was taken and cannot be read")
 		}
-		return prior, false, ferr
+		return withoutHash(prior), false, ferr
 	}
-	return made, err == nil, err
+	return withoutHash(made), err == nil, err
+}
+
+// withoutHash is the only way an account leaves the use case: the hash stays with the store and the Hasher.
+func withoutHash(r port.Registered) port.Registered {
+	r.Account.PasswordHash = ""
+	return r
 }
 
 func (s *Service) requireActiveTenant(ctx context.Context, tenantID string) error {

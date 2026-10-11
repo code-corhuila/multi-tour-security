@@ -29,8 +29,8 @@ func refuse(field string, err error) error { return &FieldError{Field: field, Er
 func profile(r rule, c Command) (fullName, phone, role string, err error) {
 	role = r.role
 	if role == "" {
-		if role = strings.TrimSpace(c.Role); role == "" {
-			return "", "", "", refuse("role", errMissing)
+		if role = strings.TrimSpace(c.Role); !tenantRole(role) {
+			return "", "", "", refuse("role", errInvalid)
 		}
 	}
 	if r.hasActor && strings.TrimSpace(c.Actor) == "" {
@@ -59,13 +59,13 @@ func profile(r rule, c Command) (fullName, phone, role string, err error) {
 	return fullName, c.Phone, role, nil
 }
 
-func name(field, value string, max int) (string, error) {
+func name(field, value string, limit int) (string, error) {
 	value = strings.TrimSpace(value)
 	n := utf8.RuneCountInString(value)
 	if n == 0 {
 		return "", refuse(field, errMissing)
 	}
-	if n > max {
+	if n > limit {
 		return "", refuse(field, errBadLength)
 	}
 	if strings.IndexFunc(value, unicode.IsControl) >= 0 {
