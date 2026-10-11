@@ -1,0 +1,10 @@
+# nothing secret or heavy enters the build context
+.git
+.github
+.env
+.env.*
+!.env.example
+keys/
+*.pem
+*.test
+*.out

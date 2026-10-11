@@ -1,6 +1,6 @@
-# The migration runner of the security schema. It defines no database and no volume: the instance is
+# The security service and the migration runner of its schema. It defines no database and no volume: the instance is
 # that of multi-tour-infra-postgres, which includes this file in the root composition (Annex J, J.7).
-# It does not start with `up`; run it once per environment:
+# The runner does not start with `up`; run it once per environment:
 #   docker compose --env-file env/dev.env run --rm security-db-migrate
 services:
   security-db-migrate:
@@ -26,6 +26,34 @@ services:
       - --database-changelog-table-name=databasechangelog_security
       - --database-changelog-lock-table-name=databasechangeloglock_security
       - update
+    networks: [platform]
+
+  security:
+    # The service itself: the routes of login, accounts and the internal ones. Reached only through the gateway, so it
+    # declares expose and never ports (norm 5.6.1). The keys are files of a directory of the environment, never an image layer.
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: multi-tour-security:0.1.0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HTTP_PORT: "8086"
+      DATABASE_URL: postgres://security_app:${SECURITY_APP_PASSWORD:?SECURITY_APP_PASSWORD is required, set it in env/<environment>.env}@postgres:5432/${PG_DATABASE:?PG_DATABASE is required, set it in env/<environment>.env}
+      JWT_PRIVATE_KEY_FILE: /run/keys/private.pem
+      JWT_PUBLIC_KEY_FILE: /run/keys/public.pem
+    volumes:
+      - ${JWT_KEYS_DIR:?JWT_KEYS_DIR is required, the directory with private.pem and public.pem}:/run/keys:ro
+    expose:
+      - "8086"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8086/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
     networks: [platform]
 
 networks:
