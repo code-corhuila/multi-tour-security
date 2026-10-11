@@ -147,3 +147,11 @@ func TestC_EveryRefusalOfTheUseCaseOnTheFirstAdministratorIsTranslated(t *testin
 		}
 	}
 }
+
+func TestC_TheKeyOfTheFirstAdministratorReachesTheUseCaseUntouchedSoItCanRefuseAShortOne(t *testing.T) {
+	svc := &fakeCreator{err: &createaccount.FieldError{Field: "idempotencyKey", Err: errors.New("has a length out of range")}}
+	rec := postAdmin(adminHandler(svc, io.Discard), adminRoute, serviceBearer(t), "application/json", adminBody, "short")
+	if rec.Code != http.StatusBadRequest || len(svc.commands) != 1 || svc.commands[0].IdempotencyKey != "short" || !strings.Contains(rec.Body.String(), "idempotencyKey") {
+		t.Fatalf("%d %s %+v", rec.Code, rec.Body, svc.commands)
+	}
+}

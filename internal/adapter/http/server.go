@@ -75,6 +75,9 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 		// public by design: a person who has no account has no token
 		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/accounts", s.createCustomerAccount)
 	}
+	if s.firstAdmins != nil {
+		mux.Handle("POST /api/v1/security/internal/tenants/{tenantId}/administrators", s.protect(s.requireService(http.HandlerFunc(s.createFirstAdministrator))))
+	}
 	mux.Handle("/", s.protect(http.HandlerFunc(s.notFound)))
 	return s.correlate(mux)
 }
@@ -90,6 +93,7 @@ type server struct {
 	tenantEvents   TenantEventService
 	accounts       AccountCreator
 	accountTenants TenantFinder
+	firstAdmins    AccountCreator
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {

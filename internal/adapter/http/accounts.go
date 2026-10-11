@@ -70,15 +70,17 @@ func (s *server) createCustomerAccount(w http.ResponseWriter, r *http.Request) {
 // accountBody is the AccountResponse of the contract. The entity is never serialized: this object has no field for a
 // password, a hash or a temporary credential.
 type accountBody struct {
-	AccountID     string    `json:"accountId"`
-	TenantID      string    `json:"tenantId"`
-	FullName      string    `json:"fullName,omitempty"`
-	Email         string    `json:"email"`
-	Phone         string    `json:"phone,omitempty"`
-	Roles         []string  `json:"roles"`
-	AccountStatus string    `json:"accountStatus"`
-	EmailVerified bool      `json:"emailVerified"`
-	CreatedAt     time.Time `json:"createdAt"`
+	AccountID     string   `json:"accountId"`
+	TenantID      string   `json:"tenantId"`
+	FullName      string   `json:"fullName,omitempty"`
+	Email         string   `json:"email"`
+	Phone         string   `json:"phone,omitempty"`
+	Roles         []string `json:"roles"`
+	AccountStatus string   `json:"accountStatus"`
+	EmailVerified bool     `json:"emailVerified"`
+	// TemporaryCredentialUntil is the end of a temporary credential, never the credential; absent for an ordinary one.
+	TemporaryCredentialUntil *time.Time `json:"temporaryCredentialUntil,omitempty"`
+	CreatedAt                time.Time  `json:"createdAt"`
 }
 
 // answerAccount is the only place where the answer of the use case that makes accounts becomes HTTP: 201 for a new
@@ -129,8 +131,14 @@ func toAccountBody(reg port.Registered) (accountBody, error) {
 	default:
 		return accountBody{}, errors.New("the account has a status the contract does not know")
 	}
+	var until *time.Time
+	if !reg.Account.TemporaryUntil.IsZero() {
+		u := reg.Account.TemporaryUntil.UTC()
+		until = &u
+	}
 	return accountBody{
-		AccountID: reg.Account.ID, TenantID: reg.Account.TenantID, FullName: reg.FullName, Email: reg.Account.EmailNormalized,
+		TemporaryCredentialUntil: until,
+		AccountID:                reg.Account.ID, TenantID: reg.Account.TenantID, FullName: reg.FullName, Email: reg.Account.EmailNormalized,
 		Phone: reg.Phone, Roles: []string{reg.Role}, AccountStatus: status, EmailVerified: reg.EmailVerified,
 		CreatedAt: reg.CreatedAt.UTC(),
 	}, nil

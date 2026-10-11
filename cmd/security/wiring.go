@@ -39,5 +39,5 @@ func buildHandler(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Han
 	events := &outbox.Service{Store: postgres.NewOutbox(pool), Clock: time.Now, Policy: outbox.DefaultPolicy}
 	return httpadapter.New(httpadapter.NewVerifier(cfg.publicKey), logger,
 		httpadapter.WithSignIn(signIn), httpadapter.WithRefresh(renewal), httpadapter.WithChangePassword(firstPassword),
-		httpadapter.WithCreateAccount(newAccounts, tenants), httpadapter.WithOutbox(events), httpadapter.WithTenantEvents(&tenantevent.Service{Tenants: tenants})), nil
+		httpadapter.WithCreateAccount(newAccounts, tenants), httpadapter.WithCreateFirstAdministrator(newAccounts), httpadapter.WithOutbox(events), httpadapter.WithTenantEvents(&tenantevent.Service{Tenants: tenants})), nil
 }
