@@ -34,3 +34,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: security-ddl-tables-003
+      author: Molina211
+      labels: "HU-SEC-002,ddl,tables"
+      comment: "The keys of the account creation, one per intent, written with the account (HU-SEC-002, plan D-04, D-05)."
+      changes:
+        - sqlFile:
+            path: 003_create_idempotency_key.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/003_create_idempotency_key.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
