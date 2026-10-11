@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/code-corhuila/multi-tour-security/internal/adapter/postgres/pgtest"
 )
@@ -26,7 +28,7 @@ func envOf(values map[string]string) func(string) string {
 func runBootstrap(url, email, stdin string) (string, error) {
 	var out bytes.Buffer
 	err := execute(context.Background(), []string{"bootstrap-platform-admin"},
-		envOf(map[string]string{"DATABASE_URL": url, "PLATFORM_ADMIN_EMAIL": email}), strings.NewReader(stdin), &out)
+		envOf(map[string]string{"DATABASE_URL": url, "PLATFORM_ADMIN_EMAIL": email}), strings.NewReader(stdin), &out, os.ReadFile, time.Now)
 	return out.String(), err
 }
 
@@ -115,7 +117,7 @@ func TestC_ThePasswordIsReadAsTypedWithOnlyTheLineEndRemoved(t *testing.T) {
 
 func TestC_AnUnknownCommandIsRefusedAndTheKnownOnesAreListed(t *testing.T) {
 	var out bytes.Buffer
-	err := execute(context.Background(), []string{"Sup3r-Secret-Pass!"}, envOf(nil), strings.NewReader(""), &out)
+	err := execute(context.Background(), []string{"Sup3r-Secret-Pass!"}, envOf(nil), strings.NewReader(""), &out, os.ReadFile, time.Now)
 	if err == nil || !strings.Contains(err.Error(), "bootstrap-platform-admin") || strings.Contains(err.Error(), "Sup3r") {
 		t.Fatalf("%v", err)
 	}

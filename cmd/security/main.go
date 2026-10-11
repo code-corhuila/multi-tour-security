@@ -42,7 +42,7 @@ func main() {
 func run(logger *slog.Logger) error {
 	if len(os.Args) > 1 {
 		// a command of the tooling profile, not the server
-		return execute(context.Background(), os.Args[1:], os.Getenv, os.Stdin, os.Stdout)
+		return execute(context.Background(), os.Args[1:], os.Getenv, os.Stdin, os.Stdout, os.ReadFile, time.Now)
 	}
 	cfg, err := loadConfig(os.Getenv, os.ReadFile)
 	if err != nil {
