@@ -113,7 +113,11 @@ refused() { # fragment, statement
   printf '%s' "$out" | grep -q "$1" || { echo "refused, but not for the expected reason ($1): $out"; return 1; }
 }
 # every table with a foreign key to these must be in the list, or the TRUNCATE fails and the probes say so
-clean() { psql_admin -c "TRUNCATE security.refresh_token, security.session, security.membership_role, security.membership, security.identity, security.tenant_copy" >/dev/null || { echo "could not clean the tables"; return 1; }; }
+clean() {
+  # the key table (HU-SEC-002) references identity, so it joins the TRUNCATE once it exists
+  extra=$(psql_admin -c "SELECT CASE WHEN to_regclass('security.idempotency_key') IS NULL THEN '' ELSE ', security.idempotency_key' END") || return 1
+  psql_admin -c "TRUNCATE security.refresh_token, security.session, security.membership_role, security.membership, security.identity, security.tenant_copy$extra" >/dev/null || { echo "could not clean the tables"; return 1; }
+}
 identity() { # tenant (quoted uuid or NULL), e-mail, status
   printf "INSERT INTO security.identity (identity_id, tenant_id, email_normalized, password_hash, identity_status) VALUES (gen_random_uuid(), %s, '%s', '%s', '%s')" "$1" "$2" "$HASH" "${3:-ACTIVE}"
 }
@@ -198,6 +202,43 @@ the_app_user_writes_the_new_tables_and_the_indexes_exist() {
   [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = 'security' AND indexname IN ('idx_session_identity_id', 'idx_refresh_token_session_id', 'idx_session_expires_at', 'idx_refresh_token_expires_at')")" = 4 ] || { echo "an index of the accounts is missing"; return 1; }
 }
 
+# ---- the probes of the account creation (spec 002-hu-sec-002, task ACC-03): profile columns and the idempotency key
+a_profile_is_optional_and_refuses_a_name_or_phone_out_of_range() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" ana@example.com)" >/dev/null || return 1
+  psql_admin -c "UPDATE security.identity SET full_name = NULL, phone = NULL" >/dev/null || { echo "a profile of null was refused"; return 1; }
+  psql_admin -c "UPDATE security.identity SET full_name = repeat('n', 100), phone = '+57 (300) 123-4567'" >/dev/null || { echo "a valid profile was refused"; return 1; }
+  refused chk_identity_full_name "UPDATE security.identity SET full_name = ''" || return 1
+  refused chk_identity_full_name "UPDATE security.identity SET full_name = repeat('n', 101)" || return 1
+  refused chk_identity_phone "UPDATE security.identity SET phone = '123456'" || return 1
+  refused chk_identity_phone "UPDATE security.identity SET phone = repeat('1', 21)" || return 1
+  refused chk_identity_phone "UPDATE security.identity SET phone = '300 abc 4567'"
+}
+the_idempotency_key_is_unique_per_scope_and_between_8_and_128_characters() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" ana@example.com)" >/dev/null || return 1
+  id=$(psql_admin -c "SELECT identity_id FROM security.identity LIMIT 1")
+  key() { printf "INSERT INTO security.idempotency_key (scope, idempotency_key, identity_id) VALUES ('%s', '%s', '$id')" "$1" "$2"; }
+  psql_admin -c "$(key customer:$T1 abcdefgh)" >/dev/null || return 1
+  refused pk_idempotency_key "$(key customer:$T1 abcdefgh)" || return 1
+  psql_admin -c "$(key customer:$T2 abcdefgh)" -c "$(key first-admin:$T1 abcdefgh)" >/dev/null || { echo "the same key in another scope was refused"; return 1; }
+  refused chk_idempotency_key_length "$(key customer:$T1 abcdefg)" || return 1
+  refused chk_idempotency_key_length "$(key customer:$T1 "$(printf 'k%.0s' $(seq 1 129))")" || return 1
+  psql_admin -c "$(key customer:$T1 "$(printf 'k%.0s' $(seq 1 128))")" >/dev/null
+}
+the_idempotency_key_follows_its_account_and_has_its_index() {
+  clean || return 1
+  ghost=00000000-0000-4000-8000-0000000000ff
+  refused fk_idempotency_key_identity "INSERT INTO security.idempotency_key (scope, idempotency_key, identity_id) VALUES ('customer:$T1', 'abcdefgh', '$ghost')" || return 1
+  psql_admin -c "$(identity "'$T1'" ana@example.com)" >/dev/null || return 1
+  id=$(psql_admin -c "SELECT identity_id FROM security.identity LIMIT 1")
+  psql_admin -c "INSERT INTO security.idempotency_key (scope, idempotency_key, identity_id) VALUES ('customer:$T1', 'abcdefgh', '$id')" >/dev/null || return 1
+  psql_admin -c "DELETE FROM security.identity WHERE identity_id = '$id'" >/dev/null || { echo "the account could not be deleted with its key"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM security.idempotency_key")" = 0 ] || { echo "the key did not follow its account"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = 'security' AND indexname = 'idx_idempotency_key_identity_id'")" = 1 ] || { echo "the index of the key's account is missing"; return 1; }
+  [ "$(psql_admin -c "SELECT has_table_privilege('security_app', 'security.idempotency_key', 'INSERT,UPDATE,DELETE')")" = t ] || { echo "security_app cannot write the key table"; return 1; }
+}
+
 # ---- an empty instance, as multi-tour-infra-postgres leaves it for this domain (J.7)
 docker build -q -f deploy/liquibase.Dockerfile -t "$LIQUIBASE_IMAGE" deploy >/dev/null || { echo "the runner image did not build"; exit 1; }
 docker network create "$RUN_ID" >/dev/null || exit 1
@@ -227,6 +268,9 @@ check "I·tenant_copy_has_one_row_per_tenant_and_a_known_status" tenant_copy_has
 check "I·foreign_keys_hold_and_restrict_or_cascade_as_declared" foreign_keys_hold_and_restrict_or_cascade_as_declared
 check "I·the_other_checks_refuse_what_they_name" the_other_checks_refuse_what_they_name
 check "I·the_app_user_writes_the_new_tables_and_the_indexes_exist" the_app_user_writes_the_new_tables_and_the_indexes_exist
+check "I·a_profile_is_optional_and_refuses_a_name_or_phone_out_of_range" a_profile_is_optional_and_refuses_a_name_or_phone_out_of_range
+check "I·the_idempotency_key_is_unique_per_scope_and_between_8_and_128_characters" the_idempotency_key_is_unique_per_scope_and_between_8_and_128_characters
+check "I·the_idempotency_key_follows_its_account_and_has_its_index" the_idempotency_key_follows_its_account_and_has_its_index
 clean
 check "I·db_ci_rolls_back_to_empty" rolled_back_to_empty
 check "I·db_ci_rebuilds_after_the_rollback" lb update
