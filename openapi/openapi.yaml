@@ -393,6 +393,51 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/security/internal/tenants/{tenantId}/administrators:
+    post:
+      summary: Create the first Administrator of a tenant
+      description: >
+        Step 2 of the saga onboard-tenant. Creates the account of the first TENANT_ADMINISTRATOR of the tenant of the
+        path, with the password the Platform Administrator typed as a temporary credential of 72 hours: the first
+        sign-in only allows choosing another password. The saga is the authority that the tenant exists, so the copy
+        of the tenant is not consulted. The Idempotency-Key is saga:step; a repeat answers 200 with the account already
+        created and runs nothing. An e-mail that already has an account in that tenant is 422 with details naming the
+        field email. Requires the role SERVICE and nothing else. The answer never carries a credential.
+      operationId: createFirstAdministrator
+      tags: [Internal]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFirstAdministratorRequest'
+      responses:
+        "201":
+          $ref: '#/components/responses/Account'
+        "200":
+          $ref: '#/components/responses/Account'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
 components:
   parameters:
     IdempotencyKey:
@@ -595,6 +640,15 @@ components:
         phone: {type: string, pattern: '^[0-9+() -]{7,20}$'}
         password: {type: string, minLength: 8, maxLength: 72, description: "At most 72 bytes, which the policy checks"}
         passwordConfirmation: {type: string, minLength: 1, maxLength: 72, description: Must match password}
+    CreateFirstAdministratorRequest:
+      type: object
+      description: The password was already confirmed on the onboarding screen, so there is no confirmation here
+      required: [fullName, email, password]
+      additionalProperties: false
+      properties:
+        fullName: {type: string, minLength: 1, maxLength: 100}
+        email: {type: string, minLength: 3, maxLength: 254}
+        password: {type: string, minLength: 8, maxLength: 72, description: "The temporary credential; at most 72 bytes, which the policy checks"}
     AccountResponse:
       type: object
       description: An account of a tenant. Never carries a password, a hash or any credential.
@@ -612,6 +666,7 @@ components:
             enum: [FINAL_CUSTOMER, TENANT_ADMINISTRATOR, OPERATIONAL_COLLABORATOR, MANAGER, ACCOUNTANT, ANALYST]
         accountStatus: {type: string, enum: [ACTIVE, INACTIVE]}
         emailVerified: {type: boolean}
+        temporaryCredentialUntil: {type: string, format: date-time, description: Present while a temporary credential is in force}
         createdAt: {type: string, format: date-time}
     SessionResponse:
       type: object

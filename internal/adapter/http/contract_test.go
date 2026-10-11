@@ -107,7 +107,7 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 			req.Header.Set("Content-Type", contentType)
 		}
 		req.Header.Set("X-Correlation-Id", "gate-1")
-		if strings.HasSuffix(path, "/events") || strings.HasSuffix(path, "/accounts") {
+		if strings.HasSuffix(path, "/events") || strings.HasSuffix(path, "/accounts") || strings.HasSuffix(path, "/administrators") {
 			req.Header.Set("Idempotency-Key", eventKey)
 		}
 		rec := httptest.NewRecorder()
@@ -220,6 +220,27 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		{"application/json", customerBody, &fakeCreator{err: errors.New("boom")}, known, http.StatusInternalServerError},
 	} {
 		run(accountsHandler(c.svc, c.tenants, io.Discard), http.MethodPost, accountsRoute, c.contentType, c.body, "", c.want)
+	}
+
+	// the first Administrator of a tenant, for the saga: only a service, and every answer of the use case
+	bigAdmin := `{"fullName":"` + strings.Repeat("a", 4200) + `"}`
+	for _, c := range []struct {
+		contentType, body, token string
+		svc                      *fakeCreator
+		want                     int
+	}{
+		{"application/json", adminBody, svcToken, &fakeCreator{reg: temporaryAdmin(), created: true}, http.StatusCreated},
+		{"application/json", adminBody, svcToken, &fakeCreator{reg: temporaryAdmin()}, http.StatusOK},
+		{"application/json", `{"fullName":`, svcToken, &fakeCreator{}, http.StatusBadRequest},
+		{"application/json", adminBody, svcToken, &fakeCreator{err: &createaccount.FieldError{Field: "password", Err: errors.New("weak")}}, http.StatusBadRequest},
+		{"application/json", adminBody, "", &fakeCreator{}, http.StatusUnauthorized},
+		{"application/json", adminBody, tokenWith(t, []string{"TENANT_ADMINISTRATOR"}, accountTenant, ""), &fakeCreator{}, http.StatusForbidden},
+		{"text/plain", adminBody, svcToken, &fakeCreator{}, http.StatusUnsupportedMediaType},
+		{"application/json", bigAdmin, svcToken, &fakeCreator{}, http.StatusRequestEntityTooLarge},
+		{"application/json", adminBody, svcToken, &fakeCreator{err: port.ErrEmailTaken}, http.StatusUnprocessableEntity},
+		{"application/json", adminBody, svcToken, &fakeCreator{err: errors.New("boom")}, http.StatusInternalServerError},
+	} {
+		run(adminHandler(c.svc, io.Discard), http.MethodPost, adminRoute, c.contentType, c.body, c.token, c.want)
 	}
 
 	for path, item := range doc.Paths.Map() {
