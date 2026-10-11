@@ -49,8 +49,14 @@ func keyOwner(ctx context.Context, q rowQuerier, scope, key string) (string, boo
 // Create writes the identity, its membership, its role and the key in one transaction. The advisory lock on the key
 // makes two requests with the same key take turns: the second finds the key and gets ErrKeyTaken, and never reaches the
 // unique e-mail, which would tell it wrongly that the e-mail belongs to someone else.
+//
+// The errors returned wrap the driver's, whose PgError.Detail quotes the row that failed (an e-mail): the caller must
+// not log it.
 func (r *Registry) Create(ctx context.Context, n port.NewAccount, scope, key string) (port.Registered, error) {
-	tx, err := r.pool.Begin(ctx)
+	if n.TenantID == "" {
+		return port.Registered{}, errors.New("an account created by this registry belongs to a tenant")
+	}
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return port.Registered{}, err
 	}
@@ -73,7 +79,10 @@ func (r *Registry) Create(ctx context.Context, n port.NewAccount, scope, key str
 	if err != nil {
 		return port.Registered{}, err
 	}
-	return reg, tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return port.Registered{}, err // nothing was committed: the caller must not see the hash of an account that is not there
+	}
+	return reg, nil
 }
 
 func insertAccount(ctx context.Context, tx pgx.Tx, n port.NewAccount, scope, key string) (string, error) {
@@ -109,17 +118,18 @@ func uniqueViolation(err error, constraint string, as error) error {
 	return err
 }
 
-// load reads an account with the data the answer of a creation shows.
+// load reads an account with the data the answer of a creation shows. An account made here has exactly one role, so
+// min(role) is that role; it only picks one deterministically if another story gives an account more.
 func load(ctx context.Context, q rowQuerier, id string) (port.Registered, error) {
-	a, err := scanAccount(q.QueryRow(ctx, `SELECT `+accountColumns+` FROM security.identity WHERE identity_id = $1::uuid`, id))
+	var reg port.Registered
+	a, err := scanAccount(q.QueryRow(ctx, `SELECT `+accountColumns+`, COALESCE(full_name, ''), COALESCE(phone, ''), email_verified, COALESCE(r.role, '')
+		FROM security.identity
+		LEFT JOIN LATERAL (SELECT min(mr.role) AS role FROM security.membership m
+			JOIN security.membership_role mr USING (membership_id) WHERE m.identity_id = identity.identity_id) r ON true
+		WHERE identity_id = $1::uuid`, id), &reg.FullName, &reg.Phone, &reg.EmailVerified, &reg.Role)
+	reg.Account = a
 	if err != nil {
 		return port.Registered{}, err
 	}
-	reg := port.Registered{Account: a}
-	err = q.QueryRow(ctx, `SELECT COALESCE(i.full_name, ''), COALESCE(i.phone, ''), i.email_verified, COALESCE(min(mr.role), '')
-		FROM security.identity i
-		LEFT JOIN security.membership m ON m.identity_id = i.identity_id
-		LEFT JOIN security.membership_role mr ON mr.membership_id = m.membership_id
-		WHERE i.identity_id = $1::uuid GROUP BY i.identity_id`, id).Scan(&reg.FullName, &reg.Phone, &reg.EmailVerified, &reg.Role)
-	return reg, err
+	return reg, nil
 }
