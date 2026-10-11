@@ -642,7 +642,7 @@ components:
           type: string
         details:
           type: array
-          description: One entry per invalid field, only with 400
+          description: One entry per invalid field with 400, and the field email with the 422 of an e-mail already in use
           items:
             type: object
             properties:
