@@ -9,7 +9,7 @@ Governance and documentation live in [`multi-tour-docs`](https://github.com/code
 
 The transversal security microservice (Annex J): accounts, sign-in, tokens and revocation. It is the only service that holds the private key; every other service validates the tokens it issues with the public key. Written in Go with the standard `net/http`, in a hexagon whose core imports only the standard library. It has no `-db` repository: its schema `security` and its migrations live here, in `db/`, inside the single PostgreSQL instance of `multi-tour-infra-postgres`.
 
-Today it answers `GET /health` without a token, and answers `401` with the common error envelope on every other route that has no valid RS256 token. The stories (sign-in, tokens, revocation) add their routes one by one.
+It answers `GET /health` without a token; the sign-in, platform sign-in and renewal routes need none either; every other route answers `401` with the common error envelope unless it carries a valid RS256 token. The routes are in `openapi/openapi.yaml`.
 
 ## How to start it
 
@@ -21,7 +21,7 @@ Needs Go 1.26 and the infrastructure of `multi-tour-infra-postgres` (the instanc
 
 ## Where the data is
 
-Schema `security`, user `security_app` (it can write only there), in the instance of `multi-tour-infra-postgres`. The control tables are `databasechangelog_security` and `databasechangeloglock_security`. For now the schema holds the table `outbox_event`; the accounts arrive with their stories.
+Schema `security`, user `security_app` (it can write only there), in the instance of `multi-tour-infra-postgres`. The control tables are `databasechangelog_security` and `databasechangeloglock_security`. The schema holds the accounts, memberships, sessions, renewal values, the copy of the tenants and the outbox.
 
 ## How to test it
 
@@ -32,9 +32,16 @@ sh db/tests/db-ci.sh         # the schema from empty, rerun, rollback and rebuil
 
 `go test` validates every answer against `openapi/openapi.yaml` and fails if an operation of the contract was never exercised. The `db-ci` starts its own throwaway PostgreSQL and Liquibase containers. Both run on every pull request to `develop` and `qa` (`ci.yml`).
 
-## What is missing
+## Commands
 
-The first Platform Administrator command (`bootstrap-platform-admin`, AC-00.4) and the seven stories of the domain: see `07-api/specs/multi-tour-security/` in `multi-tour-docs`.
+Run beside the server, with the same binary and the variables exported in the shell (the binary does not read `.env` itself): `security <command>`.
+
+- `bootstrap-platform-admin` makes the first Platform Administrator, once. It reads `PLATFORM_ADMIN_EMAIL` and `DATABASE_URL`, takes the temporary password from the first line of the console (never from an argument or a variable) and does nothing if the platform already has an Administrator.
+- `issue-service-token <name> [duration]` prints one line, the token of a worker or a saga: `sub` is the name, role `SERVICE`, no tenant. It needs only `JWT_PRIVATE_KEY_FILE`. The duration is a Go duration between 1 minute and 30 days (24 hours by default). Keep the token as a secret of the environment; never version it.
+
+## Still to come
+
+The stories that create accounts, verify the e-mail, recover the password and grant permissions: see `07-api/specs/multi-tour-security/` in `multi-tour-docs`.
 
 ## Branching
 
