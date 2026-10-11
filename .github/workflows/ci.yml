@@ -44,3 +44,6 @@ jobs:
       # Builds the security schema from an empty PostgreSQL, reruns, rolls back and rebuilds (Annex A, db-ci)
       - name: db-ci
         run: sh db/tests/db-ci.sh
+      # The service image the root composition runs: it must build in the pipeline, not only on a laptop
+      - name: service image
+        run: docker build --tag multi-tour-security:ci .
