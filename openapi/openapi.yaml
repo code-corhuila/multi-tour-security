@@ -1,0 +1,707 @@
+openapi: 3.0.3
+info:
+  title: Multitour security
+  version: 0.3.0
+  description: >
+    The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
+    (ADR-004 D7). It carries only the operations the service implements; every story adds its operations here
+    before its code. The paths are the real ones, with the prefix /api/v1 that the gateway routes to this service,
+    where the design contract writes them under a servers base. Every error uses the single envelope below. The
+    design contract does not list yet the 413 and 415 that the service answers, nor the headers below; its alignment
+    is part of the evidence task of the story.
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags: [Health]
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+                  timestamp:
+                    type: string
+                    format: date-time
+                  dependencies:
+                    type: object
+                    properties:
+                      database:
+                        type: string
+                        enum: [ok, degraded, down]
+  /api/v1/security/public/tenants/{identifier}/sessions:
+    post:
+      summary: Sign in inside the tenant of a link
+      description: >
+        E-mail and password of an account of the tenant of the link /t/{identifier}. Every refusal (wrong password,
+        unknown e-mail, account of another tenant, unknown tenant, blocked account, inactive account) is the same 401.
+        A temporary credential gets a token with empty roles, access password-change and no refresh token; the
+        Administrator of an inactive tenant gets access restricted and no refresh token.
+      operationId: signIn
+      tags: [Sessions]
+      security: []
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          description: Identifier of the tenant, lowercase kebab-case
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 40
+            pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignInRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/Session'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/public/platform/sessions:
+    post:
+      summary: Sign in the Platform Administrator
+      description: >
+        Used at /platform. The account has no tenant, so the token has no tenantId. Same refusals and same answer as
+        the sign-in of a tenant.
+      operationId: platformSignIn
+      tags: [Sessions]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SignInRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/Session'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/public/sessions/refresh:
+    post:
+      summary: Renew the access token
+      description: >
+        The refresh token is opaque, single-use and lasts the 7 days of the session; a second use refuses the call and
+        revokes that session. The new token carries the roles of now, and a session of an account that was
+        inactivated, had its password changed, was signed out everywhere or belongs to a tenant that is not active
+        cannot be renewed. Every refusal is the same 401.
+      operationId: refreshSession
+      tags: [Sessions]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/Session'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/public/tenants/{identifier}/accounts:
+    post:
+      summary: Create a Final Customer account in the tenant of a link
+      description: >
+        A person creates the account of a Final Customer inside the tenant of the link /t/{identifier}: the tenant is
+        the one of the path and nothing in the body changes it. The account is created ACTIVE with the role
+        FINAL_CUSTOMER and an ordinary password. The e-mail is not verified yet (HU-SEC-003), so emailVerified is false
+        and the account can sign in all the same. The e-mail is lower-cased and trimmed; the same e-mail in another
+        tenant is another account, and in the same tenant it is refused with 422, also when the existing account is
+        inactive. A tenant that does not exist is 404; one that is not ACTIVE is 422 and creates nothing. A password that
+        breaks the policy or a confirmation that differs is 400 with the field in details. A repeat with the same
+        Idempotency-Key answers 200 with the account already created. The answer never carries a credential. A 422 for an e-mail already in use carries details naming the field email (message "already in use"); a 422 for a tenant that is not active carries no details.
+      operationId: createCustomerAccount
+      tags: [Accounts]
+      security: []
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          description: Identifier of the tenant, lowercase kebab-case
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 40
+            pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCustomerAccountRequest'
+      responses:
+        "201":
+          $ref: '#/components/responses/Account'
+        "200":
+          $ref: '#/components/responses/Account'
+        "400":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/sessions/password:
+    put:
+      summary: Choose the own password
+      description: >
+        Only the token of a temporary credential (access password-change) is accepted, and only while the temporary
+        credential is in force. The password follows the policy of 00-governance/security-policy.md (8 characters or
+        more with an upper-case letter, a lower-case letter, a number and a special character, not a common one)
+        and is at most 72 bytes, the limit of bcrypt; it differs from the temporary one. The temporary state and the
+        failed sign-ins are cleared, older sessions of the account are cut off, and AccountSessionsRevoked waits in
+        the outbox. Every other token, and a credential that cannot be changed, is the same 401.
+      operationId: changeOwnPassword
+      tags: [Sessions]
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        "204":
+          description: Password changed
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/internal/outbox:
+    get:
+      summary: Read the events waiting
+      description: >
+        The pending events that are due, across tenants, the one due for longest first (then the one that happened
+        first), with the listing envelope. Never routed by the gateway. Requires the role SERVICE and nothing else: no
+        tenant, no other role, no access mark.
+      operationId: listOutboxEvents
+      tags: [Internal]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: status
+          in: query
+          schema: {type: string, enum: [PENDING], default: PENDING}
+      responses:
+        "200":
+          description: The events waiting
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxPage'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/internal/outbox/{eventId}/published:
+    post:
+      summary: Mark an event delivered
+      description: >
+        Only after every consumer answered 201 or 200. A repeat answers 200 with the event as it is, and an event that
+        had been given up is published all the same: a delivery that did succeed is true. Requires the role SERVICE.
+      operationId: markOutboxEventPublished
+      tags: [Internal]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/EventIdPath'
+      responses:
+        "200":
+          $ref: '#/components/responses/OutboxEvent'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/internal/outbox/{eventId}/attempts:
+    post:
+      summary: Record a failed delivery
+      description: >
+        Counts the attempt, keeps the error and moves nextAttemptAt (5 s doubling to 15 min); the 20th attempt marks
+        the event failed. An event that is no longer pending is not touched by a report that came late. Requires the
+        role SERVICE.
+      operationId: recordOutboxEventAttempt
+      tags: [Internal]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/EventIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OutboxAttemptRequest'
+      responses:
+        "200":
+          $ref: '#/components/responses/OutboxEvent'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/internal/tenants/{tenantId}/events:
+    post:
+      summary: Receive an event about a tenant
+      description: >
+        Job 7 delivers TenantCreated, TenantInactivated and TenantReactivated of identity-audit, each with the full
+        new state of the tenant in its payload (the service reads identifier and tenantStatus). The Idempotency-Key is
+        the id of the event. The copy of the tenant takes the state of an event only when it is strictly newer than
+        the one it holds: an older event, or a repeat, answers 200 and changes nothing. An identifier that another
+        tenant still holds answers 503 with Retry-After, because it goes away when the event that renames that tenant
+        arrives. Requires the role SERVICE and nothing else. The body is tolerant of fields it does not name, up to
+        16 KB.
+      operationId: receiveTenantEvent
+      tags: [Internal]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: The id of the event, as the body says it
+          schema: {type: string, minLength: 8, maxLength: 128}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantEventEnvelope'
+      responses:
+        "201":
+          description: The event was applied
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "200":
+          description: The event changed nothing, because it was already received or an older one
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+        "503":
+          description: The identifier is held by another tenant for now; deliver the event again
+          headers:
+            Retry-After:
+              required: true
+              schema: {type: string}
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/v1/security/internal/tenants/{tenantId}/administrators:
+    post:
+      summary: Create the first Administrator of a tenant
+      description: >
+        Step 2 of the saga onboard-tenant. Creates the account of the first TENANT_ADMINISTRATOR of the tenant of the
+        path, with the password the Platform Administrator typed as a temporary credential of 72 hours: the first
+        sign-in only allows choosing another password. The saga is the authority that the tenant exists, so the copy
+        of the tenant is not consulted. The Idempotency-Key is saga:step; a repeat answers 200 with the account already
+        created and runs nothing. An e-mail that already has an account in that tenant is 422 with details naming the
+        field email. Requires the role SERVICE and nothing else. The answer never carries a credential.
+      operationId: createFirstAdministrator
+      tags: [Internal]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateFirstAdministratorRequest'
+      responses:
+        "201":
+          $ref: '#/components/responses/Account'
+        "200":
+          $ref: '#/components/responses/Account'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: One value per intent, the same on every retry (8 to 128 characters)
+      schema: {type: string, minLength: 8, maxLength: 128}
+    EventIdPath:
+      name: eventId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  headers:
+    CorrelationId:
+      description: The correlation id of the request, reused when it is safe and generated otherwise; it is the traceId of an error
+      required: true
+      schema:
+        type: string
+    NoStore:
+      description: A token or a refusal is never cached
+      required: true
+      schema:
+        type: string
+        enum: [no-store]
+    Challenge:
+      required: true
+      schema:
+        type: string
+        enum: [Bearer]
+  responses:
+    OutboxEvent:
+      description: The event as it is now
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/OutboxEvent'
+    Account:
+      description: The account, created now (201) or by an earlier request with the same Idempotency-Key (200)
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AccountResponse'
+    Session:
+      description: Signed in
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/SessionResponse'
+    Unauthorized:
+      description: Every refusal of a sign-in, whatever its cause, in the same words
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+        WWW-Authenticate:
+          $ref: '#/components/headers/Challenge'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Error:
+      description: An error in the single envelope; the code says which
+      headers:
+        X-Correlation-Id:
+          $ref: '#/components/headers/CorrelationId'
+        Cache-Control:
+          $ref: '#/components/headers/NoStore'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    SignInRequest:
+      type: object
+      required: [email, password]
+      additionalProperties: false
+      properties:
+        email:
+          type: string
+          minLength: 3
+          maxLength: 254
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      additionalProperties: false
+      properties:
+        refreshToken:
+          type: string
+          minLength: 20
+          maxLength: 256
+    TenantEventEnvelope:
+      type: object
+      description: The envelope of ADR-004 D4 as job 7 delivers it; fields it does not name are tolerated
+      required: [eventId, eventType, eventVersion, tenantId, aggregateId, payload, occurredAt]
+      properties:
+        eventId: {type: string, format: uuid}
+        eventType: {type: string, enum: [TenantCreated, TenantInactivated, TenantReactivated]}
+        eventVersion: {type: integer, minimum: 1}
+        tenantId: {type: string, format: uuid}
+        aggregateId: {type: string, format: uuid}
+        payload:
+          type: object
+          description: The full new state of the tenant; the service reads identifier and tenantStatus
+          required: [identifier, tenantStatus]
+          properties:
+            tenantId: {type: string, format: uuid}
+            identifier: {type: string, minLength: 3, maxLength: 40, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'}
+            tenantStatus: {type: string, enum: [PENDING, ACTIVE, INACTIVE, FAILED]}
+        correlationId: {type: string}
+        occurredAt: {type: string, format: date-time}
+    OutboxEvent:
+      type: object
+      description: An event waiting to be delivered, with the envelope of ADR-004 D4; dates are RFC 3339 in UTC
+      required: [eventId, eventType, eventVersion, aggregateId, payload, correlationId, occurredAt, status, attempts, nextAttemptAt]
+      properties:
+        eventId: {type: string, format: uuid}
+        eventType: {type: string, example: AccountSessionsRevoked}
+        eventVersion: {type: integer, minimum: 1}
+        tenantId: {type: string, format: uuid, description: Absent for the events of the Platform Administrator}
+        aggregateId: {type: string, format: uuid}
+        payload: {type: object}
+        correlationId: {type: string}
+        occurredAt: {type: string, format: date-time}
+        publishedAt: {type: string, format: date-time}
+        status: {type: string, enum: [PENDING, PUBLISHED, FAILED]}
+        attempts: {type: integer, minimum: 0}
+        lastError: {type: string}
+        nextAttemptAt: {type: string, format: date-time}
+    OutboxPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OutboxEvent'
+        meta:
+          type: object
+          required: [page, limit, total, totalPages]
+          properties:
+            page: {type: integer, minimum: 1}
+            limit: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, minimum: 0}
+            totalPages: {type: integer, minimum: 0}
+    OutboxAttemptRequest:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    ChangePasswordRequest:
+      type: object
+      required: [newPassword]
+      additionalProperties: false
+      properties:
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 72
+          description: At most 72 bytes, which the policy checks; the design contract says 128 characters
+    CreateCustomerAccountRequest:
+      type: object
+      required: [firstName, lastName, email, phone, password, passwordConfirmation]
+      additionalProperties: false
+      properties:
+        firstName: {type: string, minLength: 1, maxLength: 50}
+        lastName: {type: string, minLength: 1, maxLength: 50}
+        email: {type: string, minLength: 3, maxLength: 254}
+        phone: {type: string, pattern: '^[0-9+() -]{7,20}$'}
+        password: {type: string, minLength: 8, maxLength: 72, description: "At most 72 bytes, which the policy checks"}
+        passwordConfirmation: {type: string, minLength: 1, maxLength: 72, description: Must match password}
+    CreateFirstAdministratorRequest:
+      type: object
+      description: The password was already confirmed on the onboarding screen, so there is no confirmation here
+      required: [fullName, email, password]
+      additionalProperties: false
+      properties:
+        fullName: {type: string, minLength: 1, maxLength: 100}
+        email: {type: string, minLength: 3, maxLength: 254}
+        password: {type: string, minLength: 8, maxLength: 72, description: "The temporary credential; at most 72 bytes, which the policy checks"}
+    AccountResponse:
+      type: object
+      description: An account of a tenant. Never carries a password, a hash or any credential.
+      required: [accountId, tenantId, email, roles, accountStatus, emailVerified, createdAt]
+      properties:
+        accountId: {type: string, format: uuid}
+        tenantId: {type: string, format: uuid}
+        fullName: {type: string}
+        email: {type: string, description: "The e-mail as normalized (lower case, no surrounding spaces)"}
+        phone: {type: string}
+        roles:
+          type: array
+          items:
+            type: string
+            enum: [FINAL_CUSTOMER, TENANT_ADMINISTRATOR, OPERATIONAL_COLLABORATOR, MANAGER, ACCOUNTANT, ANALYST]
+        accountStatus: {type: string, enum: [ACTIVE, INACTIVE]}
+        emailVerified: {type: boolean}
+        temporaryCredentialUntil: {type: string, format: date-time, description: Present while a temporary credential is in force}
+        createdAt: {type: string, format: date-time}
+    SessionResponse:
+      type: object
+      description: >
+        The token pair. refreshToken is absent in the answer to a temporary credential and to a restricted access.
+        The access token is a JWT signed with RS256, 15 minutes (10 for a temporary credential).
+      required: [accessToken, tokenType, expiresIn]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        tokenType:
+          type: string
+          enum: [Bearer]
+        expiresIn:
+          type: integer
+          description: Seconds
+          example: 900
+    ErrorResponse:
+      type: object
+      required: [error, message, traceId]
+      properties:
+        error:
+          type: string
+          enum: [VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, BUSINESS_RULE_VIOLATION, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, SERVICE_UNAVAILABLE, INTERNAL_ERROR]
+        message:
+          type: string
+        details:
+          type: array
+          description: One entry per invalid field with 400, and the field email with the 422 of an e-mail already in use
+          items:
+            type: object
+            properties:
+              field: {type: string}
+              message: {type: string}
+        traceId:
+          type: string

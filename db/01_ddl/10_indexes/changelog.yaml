@@ -1,0 +1,54 @@
+databaseChangeLog:
+  - changeSet:
+      id: security-ddl-indexes-001
+      author: Molina211
+      labels: "HU-SEC-001,ddl,indexes"
+      comment: "The listing of pending events and the purge of published ones (ADR-004 D4, D10)."
+      changes:
+        - sqlFile:
+            path: 001_create_outbox_indexes.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/001_create_outbox_indexes.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: security-ddl-indexes-002
+      author: Molina211
+      labels: "HU-SEC-001,ddl,indexes"
+      comment: "The indexes of the foreign keys of the accounts and of the purge of sessions and renewal values by expiry."
+      changes:
+        - sqlFile:
+            path: 002_create_account_indexes.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/002_create_account_indexes.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: security-ddl-indexes-003
+      author: Molina211
+      labels: "HU-SEC-002,ddl,indexes"
+      comment: "The index of the foreign key of the key table (HU-SEC-002, plan D-04)."
+      changes:
+        - sqlFile:
+            path: 003_create_idempotency_key_indexes.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/003_create_idempotency_key_indexes.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

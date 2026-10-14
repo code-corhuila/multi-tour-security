@@ -1,0 +1,54 @@
+databaseChangeLog:
+  - changeSet:
+      id: security-ddl-alter-001
+      author: Molina211
+      labels: "HU-SEC-001,ddl,alter"
+      comment: "The foreign keys inside the schema, with their ON DELETE and their indexes."
+      changes:
+        - sqlFile:
+            path: 001_add_account_foreign_keys.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/001_add_account_foreign_keys.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: security-ddl-alter-002
+      author: Molina211
+      labels: "HU-SEC-002,ddl,alter"
+      comment: "The optional name and phone of an account (HU-SEC-002, plan D-04)."
+      changes:
+        - sqlFile:
+            path: 002_add_identity_profile.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/002_add_identity_profile.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: security-ddl-alter-003
+      author: Molina211
+      labels: "HU-SEC-002,ddl,alter"
+      comment: "The key table follows its account: foreign key with ON DELETE CASCADE (HU-SEC-002, plan D-04)."
+      changes:
+        - sqlFile:
+            path: 003_add_idempotency_key_foreign_key.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/003_add_idempotency_key_foreign_key.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

@@ -1,0 +1,54 @@
+databaseChangeLog:
+  - changeSet:
+      id: security-ddl-tables-001
+      author: Molina211
+      labels: "HU-SEC-001,ddl,tables"
+      comment: "The outbox of the events this service publishes, written in the same transaction as the change (ADR-004 D4)."
+      changes:
+        - sqlFile:
+            path: 001_create_outbox_event.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/001_create_outbox_event.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: security-ddl-tables-002
+      author: Molina211
+      labels: "HU-SEC-001,ddl,tables"
+      comment: "Accounts, memberships and their roles, sessions, renewal values (hashed) and the copy of the tenants (ADR-004 D5, ADR-005 E1)."
+      changes:
+        - sqlFile:
+            path: 002_create_accounts.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/002_create_accounts.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: security-ddl-tables-003
+      author: Molina211
+      labels: "HU-SEC-002,ddl,tables"
+      comment: "The keys of the account creation, one per intent, written with the account (HU-SEC-002, plan D-04, D-05)."
+      changes:
+        - sqlFile:
+            path: 003_create_idempotency_key.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/003_create_idempotency_key.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
