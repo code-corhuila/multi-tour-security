@@ -239,6 +239,66 @@ the_idempotency_key_follows_its_account_and_has_its_index() {
   [ "$(psql_admin -c "SELECT has_table_privilege('security_app', 'security.idempotency_key', 'INSERT,UPDATE,DELETE')")" = t ] || { echo "security_app cannot write the key table"; return 1; }
 }
 
+# ---- the probes of the e-mail verification (spec 004-hu-sec-003, task VER-02): the pending status, the link rows, the
+# commercial name of the tenant and the accounts that already exist
+psql_file() { # a SQL file run by the administrator, read from this checkout
+  docker exec -i -e PGPASSWORD="$ADMIN_PASSWORD" "$RUN_ID" psql -h 127.0.0.1 -U postgres -d "$DB" -v ON_ERROR_STOP=1 -tA < "$1"
+}
+LINK_HASH=$(printf 'ab%.0s' $(seq 1 32))
+
+a_pending_status_is_accepted_and_the_moment_of_verification_is_kept() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" ana@example.com PENDING)" >/dev/null || { echo "a PENDING account was refused"; return 1; }
+  refused chk_identity_status "$(identity "'$T1'" bob@example.com VERIFIED)" || return 1
+  psql_admin -c "UPDATE security.identity SET email_verified = true, email_verified_at = now(), identity_status = 'ACTIVE'" >/dev/null \
+    || { echo "email_verified_at is missing"; return 1; }
+}
+link_rows_are_valid_unique_and_follow_their_account() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" ana@example.com PENDING)" >/dev/null || return 1
+  id=$(psql_admin -c "SELECT identity_id FROM security.identity LIMIT 1")
+  link() { printf "INSERT INTO security.email_verification (identity_id, token_hash, expires_at) VALUES ('%s', '%s', now() + interval '%s')" "$id" "$1" "${2:-24 hours}"; }
+  psql_admin -c "$(link "$LINK_HASH")" >/dev/null || { echo "a valid link row was refused"; return 1; }
+  refused idx_email_verification_token_hash "$(link "$LINK_HASH")" || return 1
+  refused chk_email_verification_hash "$(link not-a-hash)" || return 1
+  refused chk_email_verification_hash "$(link "$(printf 'AB%.0s' $(seq 1 32))")" || return 1
+  refused chk_email_verification_expiry "$(link "$(printf 'cd%.0s' $(seq 1 32))" '-1 hour')" || return 1
+  refused chk_email_verification_send_error "UPDATE security.email_verification SET send_failed_at = now(), send_error = repeat('e', 201)" || return 1
+  refused fk_email_verification_identity "INSERT INTO security.email_verification (identity_id, token_hash, expires_at) VALUES ('00000000-0000-4000-8000-0000000000ff', '$(printf 'ef%.0s' $(seq 1 32))', now() + interval '1 day')" || return 1
+  psql_admin -c "DELETE FROM security.identity WHERE identity_id = '$id'" >/dev/null || { echo "the account could not be deleted with its links"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM security.email_verification")" = 0 ] || { echo "the links did not follow their account"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = 'security' AND indexname IN ('idx_email_verification_token_hash', 'idx_email_verification_identity_created_at')")" = 2 ] || { echo "an index of the links is missing"; return 1; }
+  [ "$(psql_admin -c "SELECT has_table_privilege('security_app', 'security.email_verification', 'INSERT,UPDATE,DELETE')")" = t ] || { echo "security_app cannot write the links"; return 1; }
+}
+the_tenant_copy_keeps_an_optional_commercial_name() {
+  clean || return 1
+  psql_admin -c "INSERT INTO security.tenant_copy (tenant_id, identifier, status, occurred_at) VALUES ('$T1', 'acme-tours', 'ACTIVE', now())" >/dev/null || { echo "a copy without a name was refused"; return 1; }
+  psql_admin -c "UPDATE security.tenant_copy SET commercial_name = 'Acme Tours SAS'" >/dev/null || { echo "the commercial name is missing"; return 1; }
+  refused chk_tenant_copy_commercial_name "UPDATE security.tenant_copy SET commercial_name = ''" || return 1
+  refused chk_tenant_copy_commercial_name "UPDATE security.tenant_copy SET commercial_name = repeat('n', 101)"
+}
+existing_unverified_customer_accounts_become_pending() {
+  clean || return 1
+  role() { # the account of an e-mail gets a membership with this role
+    psql_admin -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity WHERE email_normalized = '$1'" \
+               -c "INSERT INTO security.membership_role (membership_id, role) SELECT m.membership_id, '$2' FROM security.membership m JOIN security.identity i USING (identity_id) WHERE i.email_normalized = '$1'" >/dev/null
+  }
+  psql_admin -c "$(identity "'$T1'" customer@example.com)" -c "$(identity "'$T1'" verified@example.com)" \
+             -c "$(identity "'$T1'" staff@example.com)" -c "$(identity "'$T1'" both@example.com)" -c "$(identity NULL root@example.com)" >/dev/null || return 1
+  psql_admin -c "UPDATE security.identity SET email_verified = true WHERE email_normalized = 'verified@example.com'" >/dev/null || return 1
+  role customer@example.com FINAL_CUSTOMER && role verified@example.com FINAL_CUSTOMER && role staff@example.com ANALYST \
+    && role both@example.com FINAL_CUSTOMER && role both@example.com ANALYST && role root@example.com PLATFORM_ADMINISTRATOR || return 1
+  status() { psql_admin -c "SELECT identity_status FROM security.identity WHERE email_normalized = '$1'"; }
+
+  psql_file db/02_dml/001_pending_for_unverified_customers.sql >/dev/null || { echo "the data migration did not run"; return 1; }
+  [ "$(status customer@example.com)" = PENDING ] || { echo "an unverified customer account did not become pending"; return 1; }
+  for e in verified@example.com staff@example.com both@example.com root@example.com; do
+    [ "$(status $e)" = ACTIVE ] || { echo "$e must stay active"; return 1; }
+  done
+  psql_file db/05_rollbacks/02_dml/001_pending_for_unverified_customers.rollback.sql >/dev/null || { echo "its rollback did not run"; return 1; }
+  [ "$(status customer@example.com)" = ACTIVE ] || { echo "the rollback did not restore the account"; return 1; }
+}
+
 # ---- an empty instance, as multi-tour-infra-postgres leaves it for this domain (J.7)
 docker build -q -f deploy/liquibase.Dockerfile -t "$LIQUIBASE_IMAGE" deploy >/dev/null || { echo "the runner image did not build"; exit 1; }
 docker network create "$RUN_ID" >/dev/null || exit 1
@@ -271,7 +331,13 @@ check "I·the_app_user_writes_the_new_tables_and_the_indexes_exist" the_app_user
 check "I·a_profile_is_optional_and_refuses_a_name_or_phone_out_of_range" a_profile_is_optional_and_refuses_a_name_or_phone_out_of_range
 check "I·the_idempotency_key_is_unique_per_scope_and_between_8_and_128_characters" the_idempotency_key_is_unique_per_scope_and_between_8_and_128_characters
 check "I·the_idempotency_key_follows_its_account_and_has_its_index" the_idempotency_key_follows_its_account_and_has_its_index
+check "I·a_pending_status_is_accepted_and_the_moment_of_verification_is_kept" a_pending_status_is_accepted_and_the_moment_of_verification_is_kept
+check "I·link_rows_are_valid_unique_and_follow_their_account" link_rows_are_valid_unique_and_follow_their_account
+check "I·the_tenant_copy_keeps_an_optional_commercial_name" the_tenant_copy_keeps_an_optional_commercial_name
+check "I·existing_unverified_customer_accounts_become_pending" existing_unverified_customer_accounts_become_pending
+# a pending account and a link row exist when the rollback runs, which must still leave the instance empty
 clean
+psql_admin -c "$(identity "'$T1'" ana@example.com PENDING)" >/dev/null
 check "I·db_ci_rolls_back_to_empty" rolled_back_to_empty
 check "I·db_ci_rebuilds_after_the_rollback" lb update
 check "I·security_app_writes_only_its_schema_after_the_rebuild" writes_only_its_schema
