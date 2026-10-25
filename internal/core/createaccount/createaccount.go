@@ -6,12 +6,15 @@ package createaccount
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/account"
 	"github.com/code-corhuila/multi-tour-security/internal/core/password"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
+	"github.com/code-corhuila/multi-tour-security/internal/core/tenant"
+	"github.com/code-corhuila/multi-tour-security/internal/core/verification"
 )
 
 // Kind is who is being created; each kind is a row of the table.
@@ -62,6 +65,10 @@ type Service struct {
 	Registry port.AccountRegistry
 	Hasher   port.Hasher
 	Clock    func() time.Time
+	// Verifications, Mailer and Random are needed to create a customer account, which waits for its e-mail to be verified.
+	Verifications port.Verifications
+	Mailer        port.Mailer
+	Random        io.Reader
 }
 
 // Create makes the account, or returns the one the same key already made with created false and hashes nothing.
@@ -72,6 +79,9 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 	r, ok := rules(c.Kind)
 	if !ok {
 		return port.Registered{}, false, errors.New("the kind of account is not known")
+	}
+	if r.pending && (s.Verifications == nil || s.Mailer == nil || s.Random == nil) {
+		return port.Registered{}, false, ErrNotWired
 	}
 	if n := len(c.IdempotencyKey); n < 8 || n > 128 {
 		return port.Registered{}, false, refuse("idempotencyKey", errBadLength)
@@ -92,8 +102,10 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 	if r.selfService && c.Password != c.Confirmation {
 		return port.Registered{}, false, refuse("passwordConfirmation", errMismatch)
 	}
+	// a pending kind asks the copy of an active tenant, whose identifier and name go in the e-mail
+	var tn tenant.Copy
 	if r.activeTenant {
-		if err := s.requireActiveTenant(ctx, c.TenantID); err != nil {
+		if tn, err = s.requireActiveTenant(ctx, c.TenantID); err != nil {
 			return port.Registered{}, false, err
 		}
 	}
@@ -124,6 +136,14 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 	if r.temporary {
 		n.TemporaryUntil = s.Clock().Add(account.TemporaryCredentialLife)
 	}
+	var link verification.Link
+	if r.pending {
+		// the link is read from the source only now, after every refusal, so a refusal wastes no randomness
+		if link, err = verification.New(s.Random, s.Clock()); err != nil {
+			return port.Registered{}, false, err
+		}
+		n.Pending, n.Link = true, &port.NewLink{TokenHash: link.Hash, ExpiresAt: link.ExpiresAt}
+	}
 	made, err := s.Registry.Create(ctx, n, scope, c.IdempotencyKey)
 	if errors.Is(err, port.ErrKeyTaken) {
 		// another request with the same key won the race: the answer is the repeat of its account
@@ -133,7 +153,19 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 		}
 		return withoutHash(prior), false, ferr
 	}
+	if err == nil && r.pending {
+		s.sendLink(ctx, tn, email, link)
+	}
 	return withoutHash(made), err == nil, err
+}
+
+// sendLink sends the verification e-mail after the account is stored, never inside its transaction. A failure is recorded on
+// the link and nothing else changes: the account stays as created and the person asks for a new link (spec RN-SEC-004-07).
+// shortcut: a failure to record the failure is not reported, the account already exists and the person can ask again; upgrade
+// when the service has a logger in the core.
+func (s *Service) sendLink(ctx context.Context, tn tenant.Copy, email string, link verification.Link) {
+	mail := port.Mail{To: email, TenantName: tn.DisplayName(), TenantIdentifier: tn.Identifier, Token: link.Raw}
+	_ = verification.Deliver(ctx, s.Mailer, s.Verifications, s.Clock, mail, link)
 }
 
 // withoutHash is the only way an account leaves the use case: the hash stays with the store and the Hasher.
@@ -142,15 +174,15 @@ func withoutHash(r port.Registered) port.Registered {
 	return r
 }
 
-func (s *Service) requireActiveTenant(ctx context.Context, tenantID string) error {
+func (s *Service) requireActiveTenant(ctx context.Context, tenantID string) (tenant.Copy, error) {
 	t, found, err := s.Tenants.FindByID(ctx, tenantID)
 	switch {
 	case err != nil:
-		return err
+		return tenant.Copy{}, err
 	case !found:
-		return ErrTenantNotFound
+		return tenant.Copy{}, ErrTenantNotFound
 	case !t.IsActive():
-		return ErrTenantNotActive
+		return tenant.Copy{}, ErrTenantNotActive
 	}
-	return nil
+	return t, nil
 }
