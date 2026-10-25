@@ -11,6 +11,7 @@ import (
 // Options are the states of an account that a test needs besides the default (active, ordinary password).
 type Options struct {
 	Inactive           bool
+	Pending            bool
 	TemporaryUntil     time.Time
 	MembershipInactive bool
 }
@@ -22,6 +23,9 @@ func AccountWith(ctx context.Context, pool *pgxpool.Pool, tenantID, email, hash 
 	status := "ACTIVE"
 	if o.Inactive {
 		status = "INACTIVE"
+	}
+	if o.Pending {
+		status = "PENDING"
 	}
 	var until *time.Time
 	if !o.TemporaryUntil.IsZero() {
