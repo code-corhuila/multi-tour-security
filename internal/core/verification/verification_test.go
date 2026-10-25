@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/verification"
 )
@@ -68,3 +69,21 @@ func TestD_OnlyTheShapeOfALinkIsAccepted(t *testing.T) {
 type errReader struct{}
 
 func (errReader) Read([]byte) (int, error) { return 0, errors.New("no entropy") }
+
+func TestD_TheCauseOfAFailedSendHoldsNoLinkAndFitsTwoHundredValidBytes(t *testing.T) {
+	raw := strings.Repeat("a", 43)
+	got := verification.Cause(errors.New("rejected "+raw+" for "+raw), raw)
+	if strings.Contains(got, raw) || !strings.Contains(got, "[link]") {
+		t.Fatalf("cause = %q, want the link replaced", got)
+	}
+	long := verification.Cause(errors.New(strings.Repeat("é", 150)), "")
+	if len(long) > verification.MaxCause || !utf8.ValidString(long) {
+		t.Fatalf("cause has %d bytes and valid=%v, want at most 200 valid bytes", len(long), utf8.ValidString(long))
+	}
+}
+
+func TestD_CauseOfNothingIsEmpty(t *testing.T) {
+	if got := verification.Cause(nil, "x"); got != "" {
+		t.Fatalf("cause = %q", got)
+	}
+}

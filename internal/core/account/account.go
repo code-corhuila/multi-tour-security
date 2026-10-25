@@ -84,7 +84,7 @@ func ValidEmail(email string) bool {
 func (a Account) IsPlatform() bool { return a.TenantID == "" }
 
 // CanAuthenticate tells whether the account may be authenticated now, whatever the password. The order of the
-// refusals is inactive, blocked, expired; the adapter gives one and the same answer for all of them, so that a
+// refusals is inactive, blocked, expired, not verified; the adapter gives one and the same answer for all of them, so that a
 // person who does not know the password learns nothing of the state of the account (spec RN-SEC-001-02).
 func (a Account) CanAuthenticate(now time.Time) error {
 	switch {
@@ -94,6 +94,8 @@ func (a Account) CanAuthenticate(now time.Time) error {
 		return ErrBlocked
 	case !a.TemporaryUntil.IsZero() && !now.Before(a.TemporaryUntil):
 		return ErrTemporaryExpired
+	case a.Status == Pending:
+		return ErrNotVerified
 	}
 	return nil
 }
@@ -126,8 +128,13 @@ func (a Account) AfterFailure(now time.Time) (Account, bool) {
 	return a, false
 }
 
-// Verified is the account once its e-mail is verified.
-func (a Account) Verified() Account { return a }
+// Verified is a pending account once its e-mail is verified; an inactive one is not reactivated by it.
+func (a Account) Verified() Account {
+	if a.Status == Pending {
+		a.Status = Active
+	}
+	return a
+}
 
 // AfterSuccess clears the failures.
 func (a Account) AfterSuccess() Account {

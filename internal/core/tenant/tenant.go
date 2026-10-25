@@ -36,5 +36,13 @@ type Copy struct {
 	CommercialName string
 }
 
+// DisplayName is the visible name of the sender of an e-mail: the commercial name, or the platform's when the copy has none.
+func (c Copy) DisplayName() string {
+	if c.CommercialName == "" {
+		return "Multitour"
+	}
+	return c.CommercialName
+}
+
 // IsActive tells whether everyone of the tenant may sign in.
 func (c Copy) IsActive() bool { return c.Status == Active }

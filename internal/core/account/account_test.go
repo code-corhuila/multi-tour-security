@@ -217,3 +217,11 @@ func TestD_AVerifiedAccountAuthenticatesAndKeepsItsData(t *testing.T) {
 		t.Fatalf("a verified account was refused: %v", err)
 	}
 }
+
+func TestD_VerifyingNeverReactivatesAnInactiveAccount(t *testing.T) {
+	a := active()
+	a.Status = account.Inactive
+	if got := a.Verified(); got.Status != account.Inactive {
+		t.Fatalf("status = %v, want it to stay inactive", got.Status)
+	}
+}
