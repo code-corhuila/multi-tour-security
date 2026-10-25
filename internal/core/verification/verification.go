@@ -35,6 +35,7 @@ const (
 type Link struct {
 	Raw       string
 	Hash      string
+	CreatedAt time.Time
 	ExpiresAt time.Time
 }
 
@@ -45,7 +46,7 @@ func New(random io.Reader, now time.Time) (Link, error) {
 		return Link{}, err
 	}
 	raw := base64.RawURLEncoding.EncodeToString(b)
-	return Link{Raw: raw, Hash: Hash(raw), ExpiresAt: now.Add(Life)}, nil
+	return Link{Raw: raw, Hash: Hash(raw), CreatedAt: now, ExpiresAt: now.Add(Life)}, nil
 }
 
 // Hash is the SHA-256, in lower-case hexadecimal, of a link as the person sends it back.
