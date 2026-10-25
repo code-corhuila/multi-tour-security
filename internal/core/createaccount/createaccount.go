@@ -6,6 +6,7 @@ package createaccount
 import (
 	"context"
 	"errors"
+	"io"
 	"strings"
 	"time"
 
@@ -62,6 +63,10 @@ type Service struct {
 	Registry port.AccountRegistry
 	Hasher   port.Hasher
 	Clock    func() time.Time
+	// Verifications, Mailer and Random are needed to create a customer account, which waits for its e-mail to be verified.
+	Verifications port.Verifications
+	Mailer        port.Mailer
+	Random        io.Reader
 }
 
 // Create makes the account, or returns the one the same key already made with created false and hashes nothing.

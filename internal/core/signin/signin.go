@@ -23,6 +23,8 @@ var (
 	// ErrInvalidRequest is an e-mail or a password that cannot be one; it is told apart because it says nothing about
 	// any account.
 	ErrInvalidRequest = errors.New("the e-mail or the password is not valid")
+	// ErrEmailNotVerified is a pending account that gave its right password: the only refusal that is not the generic one.
+	ErrEmailNotVerified = errors.New("the e-mail of the account is not verified")
 )
 
 const (
