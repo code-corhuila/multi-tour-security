@@ -23,6 +23,8 @@ var (
 	// ErrInvalidRequest is an e-mail or a password that cannot be one; it is told apart because it says nothing about
 	// any account.
 	ErrInvalidRequest = errors.New("the e-mail or the password is not valid")
+	// ErrEmailNotVerified is a pending account that gave its right password: the only refusal that is not the generic one.
+	ErrEmailNotVerified = errors.New("the e-mail of the account is not verified")
 )
 
 const (
@@ -116,7 +118,12 @@ func (s *Service) signIn(ctx context.Context, r Request, platform bool) (Tokens,
 		}
 		return Tokens{}, ErrRefused
 	}
-	if acct.CanAuthenticate(now) != nil {
+	if err := acct.CanAuthenticate(now); err != nil {
+		// the only refusal that is not the generic one, and only after the right password: a stranger learns nothing, and the
+		// person is told how to go on. A tenant that is not active says nothing about its accounts.
+		if errors.Is(err, account.ErrNotVerified) && !inactive {
+			return Tokens{}, ErrEmailNotVerified
+		}
 		return Tokens{}, ErrRefused
 	}
 	roles, err := s.Accounts.RolesOf(ctx, acct.ID)

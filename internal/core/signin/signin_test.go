@@ -426,3 +426,48 @@ func TestC_AServiceWithoutOnePieceRefusesToWorkInsteadOfAnsweringWithoutIt(t *te
 		}()
 	}
 }
+
+func TestA_APendingAccountWithItsPasswordIsToldToVerify(t *testing.T) {
+	w := newWorld()
+	w.add("acc-1", tenantID, "ana@example.com", []string{"FINAL_CUSTOMER"}, func(a *account.Account) { a.Status = account.Pending })
+	_, err := w.service.SignIn(ctx, request("travesia-natural", "ana@example.com", password))
+	if !errors.Is(err, signin.ErrEmailNotVerified) {
+		t.Fatalf("err = %v, want the refusal that asks to verify the e-mail", err)
+	}
+	if len(w.signer.claims) != 0 || len(w.sessions.opened) != 0 || len(w.accounts.successes) != 0 || len(w.accounts.failures) != 0 {
+		t.Fatal("a pending account gets no token, no session, no success and no failure")
+	}
+}
+
+func TestA_APendingAccountWithAWrongPasswordGetsTheGenericRefusalAndAFailure(t *testing.T) {
+	w := newWorld()
+	w.add("acc-1", tenantID, "ana@example.com", []string{"FINAL_CUSTOMER"}, func(a *account.Account) { a.Status = account.Pending })
+	_, err := w.service.SignIn(ctx, request("travesia-natural", "ana@example.com", "not the password"))
+	if !errors.Is(err, signin.ErrRefused) || errors.Is(err, signin.ErrEmailNotVerified) {
+		t.Fatalf("err = %v, want the generic refusal", err)
+	}
+	if len(w.accounts.failures) != 1 {
+		t.Fatalf("the wrong password must count as a failure: %v", w.accounts.failures)
+	}
+}
+
+func TestA_APendingAccountOfAnInactiveTenantIsRefusedGenerically(t *testing.T) {
+	w := newWorld()
+	w.add("acc-1", otherID, "ana@example.com", []string{"FINAL_CUSTOMER"}, func(a *account.Account) { a.Status = account.Pending })
+	_, err := w.service.SignIn(ctx, request("parked", "ana@example.com", password))
+	if !errors.Is(err, signin.ErrRefused) || errors.Is(err, signin.ErrEmailNotVerified) {
+		t.Fatalf("err = %v, want the generic refusal: an inactive tenant says nothing about its accounts", err)
+	}
+}
+
+func TestA_APendingAccountThatIsBlockedGetsTheGenericRefusal(t *testing.T) {
+	w := newWorld()
+	w.add("acc-1", tenantID, "ana@example.com", []string{"FINAL_CUSTOMER"}, func(a *account.Account) {
+		a.Status = account.Pending
+		a.BlockedUntil = now.Add(time.Minute)
+	})
+	_, err := w.service.SignIn(ctx, request("travesia-natural", "ana@example.com", password))
+	if !errors.Is(err, signin.ErrRefused) || errors.Is(err, signin.ErrEmailNotVerified) {
+		t.Fatalf("err = %v, want the generic refusal", err)
+	}
+}
