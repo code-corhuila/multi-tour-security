@@ -1,6 +1,7 @@
 package createaccount_test
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"testing"
@@ -132,5 +133,16 @@ func TestA_TheOtherKindsNeedNeitherMailerNorRandomness(t *testing.T) {
 	w.service.Mailer, w.service.Verifications, w.service.Random = nil, nil, nil
 	if _, created, err := w.service.Create(ctx, internalUser()); err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
+	}
+}
+
+func TestA_ASourceOfRandomnessThatFailsCreatesNothing(t *testing.T) {
+	w := newWorld()
+	w.service.Random = bytes.NewReader([]byte{1, 2, 3})
+	if _, created, err := w.service.Create(ctx, customer()); err == nil || created {
+		t.Fatalf("created=%v err=%v, want a refusal", created, err)
+	}
+	if len(w.registry.created) != 0 || len(w.mailer.sent) != 0 {
+		t.Fatal("no account may exist without its link")
 	}
 }
