@@ -52,3 +52,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: security-ddl-tables-004
+      author: Molina211
+      labels: "HU-SEC-003,ddl,tables"
+      comment: "The verification links of a Final Customer account, kept as a hash (HU-SEC-003, plan D-03)."
+      changes:
+        - sqlFile:
+            path: 004_create_email_verification.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/004_create_email_verification.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

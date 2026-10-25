@@ -114,8 +114,8 @@ refused() { # fragment, statement
 }
 # every table with a foreign key to these must be in the list, or the TRUNCATE fails and the probes say so
 clean() {
-  # the key table (HU-SEC-002) references identity, so it joins the TRUNCATE once it exists
-  extra=$(psql_admin -c "SELECT CASE WHEN to_regclass('security.idempotency_key') IS NULL THEN '' ELSE ', security.idempotency_key' END") || return 1
+  # the key table (HU-SEC-002) and the link table (HU-SEC-003) reference identity, so they join the TRUNCATE once they exist
+  extra=$(psql_admin -c "SELECT CASE WHEN to_regclass('security.idempotency_key') IS NULL THEN '' ELSE ', security.idempotency_key' END || CASE WHEN to_regclass('security.email_verification') IS NULL THEN '' ELSE ', security.email_verification' END") || return 1
   psql_admin -c "TRUNCATE security.refresh_token, security.session, security.membership_role, security.membership, security.identity, security.tenant_copy$extra" >/dev/null || { echo "could not clean the tables"; return 1; }
 }
 identity() { # tenant (quoted uuid or NULL), e-mail, status
@@ -250,8 +250,10 @@ a_pending_status_is_accepted_and_the_moment_of_verification_is_kept() {
   clean || return 1
   psql_admin -c "$(identity "'$T1'" ana@example.com PENDING)" >/dev/null || { echo "a PENDING account was refused"; return 1; }
   refused chk_identity_status "$(identity "'$T1'" bob@example.com VERIFIED)" || return 1
+  [ "$(psql_admin -c "SELECT email_verified_at IS NULL FROM security.identity")" = t ] || { echo "email_verified_at must start empty"; return 1; }
   psql_admin -c "UPDATE security.identity SET email_verified = true, email_verified_at = now(), identity_status = 'ACTIVE'" >/dev/null \
     || { echo "email_verified_at is missing"; return 1; }
+  [ "$(psql_admin -c "SELECT email_verified_at IS NOT NULL AND identity_status = 'ACTIVE' FROM security.identity")" = t ] || { echo "the moment of verification was not kept"; return 1; }
 }
 link_rows_are_valid_unique_and_follow_their_account() {
   clean || return 1
@@ -273,28 +275,36 @@ link_rows_are_valid_unique_and_follow_their_account() {
 the_tenant_copy_keeps_an_optional_commercial_name() {
   clean || return 1
   psql_admin -c "INSERT INTO security.tenant_copy (tenant_id, identifier, status, occurred_at) VALUES ('$T1', 'acme-tours', 'ACTIVE', now())" >/dev/null || { echo "a copy without a name was refused"; return 1; }
+  [ "$(psql_admin -c "SELECT commercial_name IS NULL FROM security.tenant_copy")" = t ] || { echo "the commercial name must start empty"; return 1; }
   psql_admin -c "UPDATE security.tenant_copy SET commercial_name = 'Acme Tours SAS'" >/dev/null || { echo "the commercial name is missing"; return 1; }
+  [ "$(psql_admin -c "SELECT commercial_name FROM security.tenant_copy")" = 'Acme Tours SAS' ] || { echo "the commercial name was not kept"; return 1; }
   refused chk_tenant_copy_commercial_name "UPDATE security.tenant_copy SET commercial_name = ''" || return 1
   refused chk_tenant_copy_commercial_name "UPDATE security.tenant_copy SET commercial_name = repeat('n', 101)"
 }
 existing_unverified_customer_accounts_become_pending() {
   clean || return 1
   role() { # the account of an e-mail gets a membership with this role
-    psql_admin -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity WHERE email_normalized = '$1'" \
+    psql_admin -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity WHERE email_normalized = '$1' ON CONFLICT DO NOTHING" \
                -c "INSERT INTO security.membership_role (membership_id, role) SELECT m.membership_id, '$2' FROM security.membership m JOIN security.identity i USING (identity_id) WHERE i.email_normalized = '$1'" >/dev/null
   }
   psql_admin -c "$(identity "'$T1'" customer@example.com)" -c "$(identity "'$T1'" verified@example.com)" \
-             -c "$(identity "'$T1'" staff@example.com)" -c "$(identity "'$T1'" both@example.com)" -c "$(identity NULL root@example.com)" >/dev/null || return 1
-  psql_admin -c "UPDATE security.identity SET email_verified = true WHERE email_normalized = 'verified@example.com'" >/dev/null || return 1
+             -c "$(identity "'$T1'" staff@example.com)" -c "$(identity "'$T1'" both@example.com)" -c "$(identity NULL root@example.com)" \
+             -c "$(identity "'$T1'" temporary@example.com)" -c "$(identity NULL notenant@example.com)" -c "$(identity "'$T1'" gone@example.com INACTIVE)" \
+             -c "$(identity "'$T1'" admin@example.com)" -c "$(identity "'$T1'" noroles@example.com)" >/dev/null || return 1
+  psql_admin -c "UPDATE security.identity SET email_verified = true WHERE email_normalized = 'verified@example.com'" \
+             -c "UPDATE security.identity SET temporary_until = now() + interval '1 day' WHERE email_normalized = 'temporary@example.com'" >/dev/null || return 1
   role customer@example.com FINAL_CUSTOMER && role verified@example.com FINAL_CUSTOMER && role staff@example.com ANALYST \
-    && role both@example.com FINAL_CUSTOMER && role both@example.com ANALYST && role root@example.com PLATFORM_ADMINISTRATOR || return 1
+    && role both@example.com FINAL_CUSTOMER && role both@example.com ANALYST && role root@example.com PLATFORM_ADMINISTRATOR \
+    && role temporary@example.com FINAL_CUSTOMER && role notenant@example.com FINAL_CUSTOMER && role gone@example.com FINAL_CUSTOMER \
+    && role admin@example.com TENANT_ADMINISTRATOR || return 1
   status() { psql_admin -c "SELECT identity_status FROM security.identity WHERE email_normalized = '$1'"; }
 
   psql_file db/02_dml/001_pending_for_unverified_customers.sql >/dev/null || { echo "the data migration did not run"; return 1; }
   [ "$(status customer@example.com)" = PENDING ] || { echo "an unverified customer account did not become pending"; return 1; }
-  for e in verified@example.com staff@example.com both@example.com root@example.com; do
+  for e in verified@example.com staff@example.com both@example.com root@example.com temporary@example.com notenant@example.com admin@example.com noroles@example.com; do
     [ "$(status $e)" = ACTIVE ] || { echo "$e must stay active"; return 1; }
   done
+  [ "$(status gone@example.com)" = INACTIVE ] || { echo "an inactive customer must stay inactive"; return 1; }
   psql_file db/05_rollbacks/02_dml/001_pending_for_unverified_customers.rollback.sql >/dev/null || { echo "its rollback did not run"; return 1; }
   [ "$(status customer@example.com)" = ACTIVE ] || { echo "the rollback did not restore the account"; return 1; }
 }
@@ -335,9 +345,13 @@ check "I·a_pending_status_is_accepted_and_the_moment_of_verification_is_kept" a
 check "I·link_rows_are_valid_unique_and_follow_their_account" link_rows_are_valid_unique_and_follow_their_account
 check "I·the_tenant_copy_keeps_an_optional_commercial_name" the_tenant_copy_keeps_an_optional_commercial_name
 check "I·existing_unverified_customer_accounts_become_pending" existing_unverified_customer_accounts_become_pending
-# a pending account and a link row exist when the rollback runs, which must still leave the instance empty
+# a pending account, a link row, a verified moment and a commercial name exist when the rollback runs, which must still
+# leave the instance empty
 clean
-psql_admin -c "$(identity "'$T1'" ana@example.com PENDING)" >/dev/null
+psql_admin -c "$(identity "'$T1'" ana@example.com PENDING)" \
+           -c "INSERT INTO security.email_verification (identity_id, token_hash, expires_at) SELECT identity_id, '$LINK_HASH', now() + interval '1 day' FROM security.identity" \
+           -c "UPDATE security.identity SET email_verified_at = now()" \
+           -c "INSERT INTO security.tenant_copy (tenant_id, identifier, status, occurred_at, commercial_name) VALUES ('$T1', 'acme-tours', 'ACTIVE', now(), 'Acme Tours SAS')" >/dev/null
 check "I·db_ci_rolls_back_to_empty" rolled_back_to_empty
 check "I·db_ci_rebuilds_after_the_rollback" lb update
 check "I·security_app_writes_only_its_schema_after_the_rebuild" writes_only_its_schema

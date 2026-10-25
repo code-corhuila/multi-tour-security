@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: security-dml-001
+      author: Molina211
+      labels: "HU-SEC-003,dml"
+      comment: "The existing unverified customer accounts become pending (HU-SEC-003, spec R-4, plan D-15)."
+      changes:
+        - sqlFile:
+            path: 001_pending_for_unverified_customers.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../05_rollbacks/02_dml/001_pending_for_unverified_customers.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
