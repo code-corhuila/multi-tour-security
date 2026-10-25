@@ -5,6 +5,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/account"
@@ -36,11 +37,26 @@ func scanAccount(row pgx.Row, extra ...any) (account.Account, error) {
 	if err := row.Scan(dest...); err != nil {
 		return account.Account{}, err
 	}
-	if status == "INACTIVE" {
-		a.Status = account.Inactive
+	var err error
+	if a.Status, err = statusOf(status); err != nil {
+		return account.Account{}, err
 	}
 	a.TemporaryUntil, a.FirstFailedAt, a.BlockedUntil = utc(temporary), utc(first), utc(blocked)
 	return a, nil
+}
+
+// statusOf reads the status of the table. Active is the zero value of the core, so an unknown text must be an error and
+// never an active account.
+func statusOf(text string) (account.Status, error) {
+	switch text {
+	case "ACTIVE":
+		return account.Active, nil
+	case "INACTIVE":
+		return account.Inactive, nil
+	case "PENDING":
+		return account.Pending, nil
+	}
+	return account.Active, fmt.Errorf("the status %q of an account is not known", text)
 }
 
 func utc(t *time.Time) time.Time {
