@@ -187,3 +187,41 @@ func TestD_TheRefusalsComeInTheOrderInactiveBlockedExpired(t *testing.T) {
 		t.Fatalf("inactive must come first: %v", err)
 	}
 }
+
+func TestD_PendingAccountCannotAuthenticateAndTheOtherRefusalsComeFirst(t *testing.T) {
+	a := active()
+	a.Status = account.Pending
+	if err := a.CanAuthenticate(start); !errors.Is(err, account.ErrNotVerified) {
+		t.Fatalf("a pending account authenticated or failed another way: %v", err)
+	}
+	blocked := a
+	blocked.BlockedUntil = start.Add(time.Minute)
+	if err := blocked.CanAuthenticate(start); !errors.Is(err, account.ErrBlocked) {
+		t.Fatalf("a blocked pending account must be refused as blocked first: %v", err)
+	}
+	inactive := a
+	inactive.Status = account.Inactive
+	if err := inactive.CanAuthenticate(start); !errors.Is(err, account.ErrInactive) {
+		t.Fatalf("an inactive account is not a pending one: %v", err)
+	}
+}
+
+func TestD_AVerifiedAccountAuthenticatesAndKeepsItsData(t *testing.T) {
+	a := active()
+	a.Status = account.Pending
+	v := a.Verified()
+	if v.Status != account.Active || v.ID != a.ID || v.TenantID != a.TenantID || v.PasswordHash != a.PasswordHash {
+		t.Fatalf("verified = %+v", v)
+	}
+	if err := v.CanAuthenticate(start); err != nil {
+		t.Fatalf("a verified account was refused: %v", err)
+	}
+}
+
+func TestD_VerifyingNeverReactivatesAnInactiveAccount(t *testing.T) {
+	a := active()
+	a.Status = account.Inactive
+	if got := a.Verified(); got.Status != account.Inactive {
+		t.Fatalf("status = %v, want it to stay inactive", got.Status)
+	}
+}

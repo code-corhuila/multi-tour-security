@@ -32,6 +32,16 @@ type Copy struct {
 	Identifier string
 	Status     Status
 	OccurredAt time.Time
+	// CommercialName is the visible name of the sender of the e-mail; empty for a copy made before it was kept.
+	CommercialName string
+}
+
+// DisplayName is the visible name of the sender of an e-mail: the commercial name, or the platform's when the copy has none.
+func (c Copy) DisplayName() string {
+	if c.CommercialName == "" {
+		return "Multitour"
+	}
+	return c.CommercialName
 }
 
 // IsActive tells whether everyone of the tenant may sign in.
