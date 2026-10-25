@@ -52,3 +52,57 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: security-ddl-alter-004
+      author: Molina211
+      labels: "HU-SEC-003,ddl,alter"
+      comment: "The pending status and the moment of verification of an account (HU-SEC-003, plan D-01)."
+      changes:
+        - sqlFile:
+            path: 004_allow_pending_status.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/004_allow_pending_status.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: security-ddl-alter-005
+      author: Molina211
+      labels: "HU-SEC-003,ddl,alter"
+      comment: "The links follow their account: foreign key with ON DELETE CASCADE (HU-SEC-003, plan D-03)."
+      changes:
+        - sqlFile:
+            path: 005_add_email_verification_foreign_key.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/005_add_email_verification_foreign_key.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+
+  - changeSet:
+      id: security-ddl-alter-006
+      author: Molina211
+      labels: "HU-SEC-003,ddl,alter"
+      comment: "The commercial name of the tenant, for the visible sender of the e-mail (HU-SEC-003, plan D-12)."
+      changes:
+        - sqlFile:
+            path: 006_add_tenant_copy_commercial_name.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/006_add_tenant_copy_commercial_name.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

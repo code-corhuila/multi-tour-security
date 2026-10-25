@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS security.idx_email_verification_identity_created_at;
+DROP INDEX IF EXISTS security.idx_email_verification_token_hash;
