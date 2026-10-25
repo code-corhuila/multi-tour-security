@@ -32,6 +32,8 @@ type Copy struct {
 	Identifier string
 	Status     Status
 	OccurredAt time.Time
+	// CommercialName is the visible name of the sender of the e-mail; empty for a copy made before it was kept.
+	CommercialName string
 }
 
 // IsActive tells whether everyone of the tenant may sign in.

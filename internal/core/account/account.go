@@ -15,6 +15,8 @@ type Status int
 const (
 	Active Status = iota
 	Inactive
+	// Pending is a Final Customer account whose e-mail is not verified yet (HU-SEC-003).
+	Pending
 )
 
 const (
@@ -30,6 +32,7 @@ var (
 	ErrInactive         = errors.New("the account is inactive")
 	ErrBlocked          = errors.New("the account is blocked")
 	ErrTemporaryExpired = errors.New("the temporary credential has expired")
+	ErrNotVerified      = errors.New("the e-mail of the account is not verified")
 )
 
 // Account holds what the rules below need. TenantID is empty only for the Platform Administrator.
@@ -122,6 +125,9 @@ func (a Account) AfterFailure(now time.Time) (Account, bool) {
 	}
 	return a, false
 }
+
+// Verified is the account once its e-mail is verified.
+func (a Account) Verified() Account { return a }
 
 // AfterSuccess clears the failures.
 func (a Account) AfterSuccess() Account {
