@@ -10,8 +10,11 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"io"
 	"math/big"
+	"mime/quotedprintable"
 	"net"
 	"strings"
 	"sync"
@@ -45,6 +48,9 @@ type fakeServer struct {
 	user, password  string
 	rejectRecipient bool
 	silent          bool
+	quoteSecret     bool // the refusal of the credentials quotes them, as some servers do
+	badQuit         bool // the server answers an error to QUIT after it accepted the message
+	temporary       bool // the refusal of the recipient is a 4xx
 
 	mu         sync.Mutex
 	deliveries []delivery
@@ -134,7 +140,11 @@ func (s *fakeServer) serve(conn net.Conn) {
 				authed = true
 				say("235 ok")
 			} else {
-				say("535 bad credentials for %s", s.user)
+				if s.quoteSecret {
+					say("535 5.7.8 credentials %s/%s rejected", s.user, strings.TrimPrefix(string(raw), "\x00"+s.user+"\x00"))
+				} else {
+					say("535 bad credentials for %s", s.user)
+				}
 			}
 		case verb == "MAIL":
 			if s.password != "" && !authed {
@@ -144,6 +154,10 @@ func (s *fakeServer) serve(conn net.Conn) {
 			d.from = line
 			say("250 ok")
 		case verb == "RCPT":
+			if s.rejectRecipient && s.temporary {
+				say("451 4.3.0 <%s>: try again later", strings.Trim(strings.SplitN(line, ":", 2)[1], "<> "))
+				continue
+			}
 			if s.rejectRecipient {
 				say("550 5.1.1 <%s>: Recipient address rejected: user unknown", strings.Trim(strings.SplitN(line, ":", 2)[1], "<> "))
 				continue
@@ -166,6 +180,10 @@ func (s *fakeServer) serve(conn net.Conn) {
 			s.mu.Unlock()
 			say("250 queued")
 		case verb == "QUIT":
+			if s.badQuit {
+				say("421 4.3.2 shutting down")
+				return
+			}
 			say("221 bye")
 			return
 		default:
@@ -205,7 +223,8 @@ func TestI_TheMessageReachesTheAddressOverPlainSmtpInDevelopment(t *testing.T) {
 	if len(got) != 1 || !strings.Contains(got[0].from, "no-reply@multitour.example") || !strings.Contains(got[0].to, "ana@example.com") {
 		t.Fatalf("deliveries = %+v", got)
 	}
-	if got[0].secure || !strings.Contains(got[0].data, "Subject:") || !strings.Contains(got[0].data, "verificar-correo#token=") {
+	decoded, _ := io.ReadAll(quotedprintable.NewReader(strings.NewReader(got[0].data)))
+	if got[0].secure || !strings.Contains(got[0].data, "Subject:") || !strings.Contains(string(decoded), "verificar-correo#token="+token) {
 		t.Fatalf("data = %q", got[0].data)
 	}
 }
@@ -224,9 +243,9 @@ func TestI_TlsIsUsedWhenTheServerOffersItAndRequiredWhenTheConfigurationSaysSo(t
 }
 
 func TestI_RequiredTlsRefusesAServerWithoutItAndSendsNothing(t *testing.T) {
-	s := startServer(t, &fakeServer{})
+	s := startServer(t, &fakeServer{user: "mailer", password: "s3cret-Pass"})
 	c := config(s)
-	c.RequireTLS = true
+	c.RequireTLS, c.User, c.Password = true, "mailer", "s3cret-Pass"
 	err := mustMailer(t, c).SendVerification(ctx, verification())
 	if err == nil {
 		t.Fatal("a server without STARTTLS was accepted although TLS is required")
@@ -284,5 +303,105 @@ func TestI_ARefusedConnectionIsAnErrorThatNamesTheFailureNotTheLink(t *testing.T
 		SendVerification(ctx, verification())
 	if err == nil || strings.Contains(err.Error(), token) || strings.Contains(err.Error(), "ana@example.com") || !strings.HasPrefix(err.Error(), "smtp:") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestI_AServerThatNeverAnswersEndsWithTheDeadlineOfTheCaller(t *testing.T) {
+	s := startServer(t, &fakeServer{silent: true})
+	limited, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if err := mustMailer(t, config(s)).SendVerification(limited, verification()); err == nil {
+		t.Fatal("a silent server was a success")
+	}
+	if took := time.Since(started); took > 3*time.Second {
+		t.Fatalf("it waited %s, the deadline was 400 ms", took)
+	}
+}
+
+func TestI_TlsIsUsedWhenOfferedEvenIfItIsNotRequired(t *testing.T) {
+	tlsConfig, roots := selfSigned(t)
+	s := startServer(t, &fakeServer{offerTLS: true, cert: tlsConfig})
+	c := config(s)
+	c.TLSConfig = &tls.Config{RootCAs: roots}
+	if err := mustMailer(t, c).SendVerification(ctx, verification()); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.took(); len(got) != 1 || !got[0].secure {
+		t.Fatalf("deliveries = %+v, want one over TLS: a server that offers it is used", got)
+	}
+}
+
+func TestI_ACertificateThatIsNotTrustedIsRefusedAndNothingIsSent(t *testing.T) {
+	tlsConfig, _ := selfSigned(t)
+	s := startServer(t, &fakeServer{offerTLS: true, cert: tlsConfig})
+	c := config(s)
+	c.RequireTLS = true // no TLSConfig: the system roots, which do not trust the certificate of the test
+	if err := mustMailer(t, c).SendVerification(ctx, verification()); err == nil {
+		t.Fatal("an untrusted certificate was accepted")
+	}
+	if got, commands := s.took(); len(got) != 0 || strings.Contains(strings.Join(commands, " "), "MAIL") {
+		t.Fatalf("the link was sent to a server that could not prove who it is: %v %v", got, commands)
+	}
+}
+
+func TestI_ARefusedCredentialThatTheServerQuotesIsRedactedFromTheError(t *testing.T) {
+	s := startServer(t, &fakeServer{user: "mailer", password: "s3cret-Pass", quoteSecret: true})
+	c := config(s)
+	c.User, c.Password = "mailer", "wrong-Pass-123"
+	err := mustMailer(t, c).SendVerification(ctx, verification())
+	if err == nil || strings.Contains(err.Error(), "wrong-Pass-123") || !strings.Contains(err.Error(), "535") {
+		t.Fatalf("err = %v: the server quoted the password and the error must not", err)
+	}
+}
+
+func TestI_TheCodeOfAFailureSurvivesSoTheCallerTellsATemporaryOneFromAFinalOne(t *testing.T) {
+	for name, c := range map[string]struct {
+		temporary bool
+		code      int
+	}{"temporary": {true, 451}, "final": {false, 550}} {
+		s := startServer(t, &fakeServer{rejectRecipient: true, temporary: c.temporary})
+		err := mustMailer(t, config(s)).SendVerification(ctx, verification())
+		var sendErr *smtpmail.Error
+		if !errors.As(err, &sendErr) || sendErr.Code != c.code || sendErr.Temporary() != c.temporary {
+			t.Fatalf("%s: err = %#v, want code %d and temporary=%v", name, err, c.code, c.temporary)
+		}
+		if strings.Contains(err.Error(), "ana@example.com") {
+			t.Fatalf("%s: the address of the person is in the error", name)
+		}
+	}
+}
+
+func TestI_ARecipientThatIsNotOneAddressIsRefusedBeforeAnythingIsSaid(t *testing.T) {
+	for _, to := range []string{"a@b.com>", "a@b.com,c@d.com", "a@b.com\r\nRCPT TO:<c@d.com>", `"a b"@c.com`, "<a@b.com>", "a b@c.com", ""} {
+		s := startServer(t, &fakeServer{})
+		m := verification()
+		m.To = to
+		if err := mustMailer(t, config(s)).SendVerification(ctx, m); err == nil {
+			t.Fatalf("%q was accepted as a recipient", to)
+		}
+		if _, commands := s.took(); len(commands) != 0 {
+			t.Fatalf("%q: the server heard %v although the recipient is not an address", to, commands)
+		}
+	}
+}
+
+func TestI_AFailedQuitAfterTheMessageWasAcceptedIsNotAFailure(t *testing.T) {
+	s := startServer(t, &fakeServer{badQuit: true})
+	if err := mustMailer(t, config(s)).SendVerification(ctx, verification()); err != nil {
+		t.Fatalf("the server had already accepted the message: %v", err)
+	}
+	if got, _ := s.took(); len(got) != 1 {
+		t.Fatalf("deliveries = %d", len(got))
+	}
+}
+
+func TestI_ACancelledCallerGetsAnErrorThatSaysSo(t *testing.T) {
+	s := startServer(t, &fakeServer{silent: true})
+	cancelled, cancel := context.WithCancel(ctx)
+	go func() { time.Sleep(200 * time.Millisecond); cancel() }()
+	err := mustMailer(t, config(s)).SendVerification(cancelled, verification())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want it to wrap context.Canceled", err)
 	}
 }
