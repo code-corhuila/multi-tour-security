@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Multitour security
-  version: 0.5.0
+  version: 0.6.0
   description: >
     The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
     (ADR-004 D7). It carries only the operations the service implements; every story adds its operations here
@@ -688,11 +688,14 @@ components:
         aggregateId: {type: string, format: uuid}
         payload:
           type: object
-          description: The full new state of the tenant; the service reads identifier and tenantStatus
+          description: >
+            The full new state of the tenant; the service reads identifier, tenantStatus and commercialName, the visible
+            sender of the e-mails (cut to 100 characters; a name with a control character makes the envelope invalid)
           required: [identifier, tenantStatus]
           properties:
             tenantId: {type: string, format: uuid}
             identifier: {type: string, minLength: 3, maxLength: 40, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'}
+            commercialName: {type: string}
             tenantStatus: {type: string, enum: [PENDING, ACTIVE, INACTIVE, FAILED]}
         correlationId: {type: string}
         occurredAt: {type: string, format: date-time}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/code-corhuila/multi-tour-security/internal/adapter/postgres"
 	"github.com/code-corhuila/multi-tour-security/internal/adapter/postgres/pgtest"
 )
 
@@ -133,5 +135,17 @@ func TestC_NothingOfTheTenantIsLogged(t *testing.T) {
 	s.deliver(s.serviceToken(t), tenantZ, "TenantCreated", "nueva-agencia", "ACTIVE", time.Now())
 	if s.logs.Len() == 0 || strings.Contains(s.logs.String(), "Nueva Agencia") {
 		t.Fatalf("the log must exist and hold no payload: %s", s.logs.String())
+	}
+}
+
+func TestC_TheCommercialNameOfATenantEventIsKeptInTheCopy(t *testing.T) {
+	s := newStack(t)
+	svc := s.serviceToken(t)
+	if rec := s.deliver(svc, tenantZ, "TenantCreated", "nueva-agencia", "ACTIVE", time.Now().Add(-time.Hour)); rec.Code != http.StatusCreated {
+		t.Fatalf("created: %d %s", rec.Code, rec.Body)
+	}
+	got, found, err := postgres.NewTenants(s.pool).FindByIdentifier(context.Background(), "nueva-agencia")
+	if err != nil || !found || got.CommercialName != "Nueva Agencia SAS" {
+		t.Fatalf("copy = %+v %v %v, want the name of the event", got, found, err)
 	}
 }
