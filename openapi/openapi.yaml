@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Multitour security
-  version: 0.4.0
+  version: 0.5.0
   description: >
     The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
     (ADR-004 D7). It carries only the operations the service implements; every story adds its operations here
@@ -444,6 +444,51 @@ paths:
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
+  /api/v1/security/public/tenants/{identifier}/email-verifications:
+    post:
+      summary: Ask for a new e-mail verification link
+      description: >
+        A person gives the e-mail of their account in the tenant of the link /t/{identifier}. The answer is always 202
+        with no body when the request is well formed, whether the account exists, is pending, is already verified, has
+        already received three links in the last hour, or the tenant is not active, so the route tells nobody which
+        e-mails have an account (HU-SEC-003, RN-SEC-004-06). The work is done after the answer: a link is sent only to
+        a PENDING account of an active tenant that received fewer than three links in the last hour, and it retires
+        every earlier link of the account. It takes no Idempotency-Key. A malformed body, or an e-mail that cannot be
+        one, is 400. The design contract also lists 500; this service never answers it here, because nothing is done
+        before the answer.
+      operationId: requestEmailVerification
+      tags: [Accounts]
+      security: []
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          description: Identifier of the tenant, lowercase kebab-case
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 40
+            pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailVerificationRequest'
+      responses:
+        "202":
+          description: Accepted; a link is sent only when the rules allow it
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
 components:
   parameters:
     IdempotencyKey:
@@ -562,6 +607,12 @@ components:
           type: string
           minLength: 20
           maxLength: 256
+    EmailVerificationRequest:
+      type: object
+      required: [email]
+      additionalProperties: false
+      properties:
+        email: {type: string, minLength: 3, maxLength: 254}
     TenantEventEnvelope:
       type: object
       description: The envelope of ADR-004 D4 as job 7 delivers it; fields it does not name are tolerated
