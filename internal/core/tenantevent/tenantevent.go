@@ -32,7 +32,9 @@ type Event struct {
 	PayloadTenantID string // empty when the payload does not name it
 	Identifier      string
 	Status          string
-	OccurredAt      time.Time
+	// CommercialName is the visible name of the tenant in the payload; empty when the event does not carry it.
+	CommercialName string
+	OccurredAt     time.Time
 }
 
 var (

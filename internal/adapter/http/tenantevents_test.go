@@ -191,3 +191,11 @@ func TestC_WithoutTheTenantEventsUseCaseTheRouteDoesNotExist(t *testing.T) {
 		t.Fatalf("got %d", rec.Code)
 	}
 }
+
+func TestC_TheCommercialNameOfThePayloadReachesTheUseCase(t *testing.T) {
+	svc := &fakeTenantEvents{applied: true}
+	rec := deliver(eventsHandler(svc, io.Discard), serviceBearer(t), eventKey, "application/json", envelopeJSON("TenantCreated", "ACTIVE"))
+	if rec.Code != http.StatusCreated || len(svc.got) != 1 || svc.got[0].CommercialName != "Travesía Natural SAS" {
+		t.Fatalf("%d %+v", rec.Code, svc.got)
+	}
+}
