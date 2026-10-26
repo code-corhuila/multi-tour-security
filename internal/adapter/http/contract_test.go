@@ -21,6 +21,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenantevent"
+	"github.com/code-corhuila/multi-tour-security/internal/core/verifyemail"
 )
 
 // Every answer is validated against the published contract, each scenario says the status it must give, and the last
@@ -243,6 +244,27 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 	} {
 		handler := askHandler(&fakeRequester{err: c.err}, background(time.Second), io.Discard)
 		run(handler, http.MethodPost, c.path, c.contentType, c.body, "", c.want)
+	}
+
+	// confirming the e-mail has its own answers
+	bigConfirm := `{"token":"` + linkToken + `","password":"` + strings.Repeat("p", 4200) + `"}`
+	for _, c := range []struct {
+		contentType, body string
+		err               error
+		want              int
+	}{
+		{"application/json", confirmBody, nil, http.StatusNoContent},
+		{"application/json", `{"token":`, nil, http.StatusBadRequest},
+		{"application/json", confirmBody, verifyemail.ErrInvalidRequest, http.StatusBadRequest},
+		{"application/json", confirmBody, verifyemail.ErrWrongPassword, http.StatusUnauthorized},
+		{"application/json", confirmBody, verifyemail.ErrTenantNotFound, http.StatusNotFound},
+		{"application/json", bigConfirm, nil, http.StatusRequestEntityTooLarge},
+		{"text/plain", confirmBody, nil, http.StatusUnsupportedMediaType},
+		{"application/json", confirmBody, verifyemail.ErrBadLink, http.StatusUnprocessableEntity},
+		{"application/json", confirmBody, errors.New("boom"), http.StatusInternalServerError},
+	} {
+		handler := verificationHandler(&fakeRequester{}, &fakeConfirmer{err: c.err}, background(time.Second), io.Discard)
+		run(handler, http.MethodPost, confirmRoute, c.contentType, c.body, "", c.want)
 	}
 
 	// the first Administrator of a tenant, for the saga: only a service, and every answer of the use case
