@@ -68,11 +68,11 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	return serve(ctx, listener, handler, logger)
+	return serve(ctx, listener, handler, logger, func(context.Context) error { return nil })
 }
 
 // serve answers until ctx ends, then drains the requests in flight within shutdownTimeout.
-func serve(ctx context.Context, listener net.Listener, handler http.Handler, logger *slog.Logger) error {
+func serve(ctx context.Context, listener net.Listener, handler http.Handler, logger *slog.Logger, wait func(context.Context) error) error {
 	server := &http.Server{
 		Handler:           handler,
 		ReadHeaderTimeout: readHeaderTimeout,
