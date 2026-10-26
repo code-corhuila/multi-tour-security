@@ -86,7 +86,7 @@ func TestD_TheLinkHasItsValueAfterTheHashInBothAlternatives(t *testing.T) {
 
 func TestD_TheTokenIsOnlyInTheBodyNeverInAHeader(t *testing.T) {
 	raw, _ := buildMessage("no-reply@multitour.example", "https://app.multitour.example", verification(), sent, "id-1@multitour.example")
-	header, _ := parts(t, raw)
+	header, texts := parts(t, raw)
 	for name, values := range header {
 		for _, v := range values {
 			if strings.Contains(v, token) {
@@ -94,7 +94,8 @@ func TestD_TheTokenIsOnlyInTheBodyNeverInAHeader(t *testing.T) {
 			}
 		}
 	}
-	if strings.Count(string(raw), token) < 2 {
+	// the body is quoted-printable, which wraps long lines, so it is read as a receiver reads it
+	if !strings.Contains(texts["text/plain"], token) || !strings.Contains(texts["text/html"], token) {
 		t.Fatal("the token must be in both alternatives of the body")
 	}
 }
