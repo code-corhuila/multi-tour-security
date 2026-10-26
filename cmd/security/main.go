@@ -71,7 +71,9 @@ func run(logger *slog.Logger) error {
 	return serve(ctx, listener, handler, logger, func(context.Context) error { return nil })
 }
 
-// serve answers until ctx ends, then drains the requests in flight within shutdownTimeout.
+// serve answers until ctx ends, then drains the requests in flight within shutdownTimeout and waits, within what is left of
+// it, for the work that was started after an answer: only once no request is in flight can no new work begin. If the drain
+// itself fails the work is not waited for.
 func serve(ctx context.Context, listener net.Listener, handler http.Handler, logger *slog.Logger, wait func(context.Context) error) error {
 	server := &http.Server{
 		Handler:           handler,
@@ -96,6 +98,9 @@ func serve(ctx context.Context, listener net.Listener, handler http.Handler, log
 	}
 	if err := <-failed; !errors.Is(err, http.ErrServerClosed) {
 		return err
+	}
+	if err := wait(shutdownCtx); err != nil {
+		logger.Warn("work started after an answer did not end in time")
 	}
 	return nil
 }
