@@ -41,3 +41,9 @@ func buildHandler(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Han
 		httpadapter.WithSignIn(signIn), httpadapter.WithRefresh(renewal), httpadapter.WithChangePassword(firstPassword),
 		httpadapter.WithCreateAccount(newAccounts, tenants), httpadapter.WithCreateFirstAdministrator(newAccounts), httpadapter.WithOutbox(events), httpadapter.WithTenantEvents(&tenantevent.Service{Tenants: tenants})), nil
 }
+
+// build is buildHandler with the runner of the work that is done after the answer, which the shutdown waits for.
+func build(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Handler, *httpadapter.Background, error) {
+	handler, err := buildHandler(pool, cfg, logger)
+	return handler, httpadapter.NewBackground(logger, time.Second, 1), err
+}

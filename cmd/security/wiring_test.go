@@ -18,6 +18,7 @@ import (
 	httpadapter "github.com/code-corhuila/multi-tour-security/internal/adapter/http"
 	"github.com/code-corhuila/multi-tour-security/internal/adapter/postgres"
 	"github.com/code-corhuila/multi-tour-security/internal/adapter/postgres/pgtest"
+	"github.com/code-corhuila/multi-tour-security/internal/adapter/smtpmail"
 	"github.com/code-corhuila/multi-tour-security/internal/core/session"
 	coretenant "github.com/code-corhuila/multi-tour-security/internal/core/tenant"
 	"github.com/golang-jwt/jwt/v5"
@@ -54,11 +55,12 @@ func realHash(t *testing.T) string {
 }
 
 type stack struct {
-	handler http.Handler
-	pool    *pgxpool.Pool
-	logs    *bytes.Buffer
-	public  *rsa.PublicKey
-	private *rsa.PrivateKey
+	handler    http.Handler
+	background *httpadapter.Background
+	pool       *pgxpool.Pool
+	logs       *bytes.Buffer
+	public     *rsa.PublicKey
+	private    *rsa.PrivateKey
 }
 
 func newStack(t *testing.T) *stack {
@@ -69,12 +71,31 @@ func newStack(t *testing.T) *stack {
 // newStackOn is newStack on a database the test already has, for what must share it with a command.
 func newStackOn(t *testing.T, pool *pgxpool.Pool) *stack {
 	t.Helper()
+	return newStackOnMail(t, pool, unreachableMail())
+}
+
+// unreachableMail is a mail server nobody listens on: the tests that do not read the e-mail do not need one, and a send
+// that fails must not undo anything.
+func unreachableMail() smtpmail.Config {
+	return smtpmail.Config{Host: "127.0.0.1", Port: 1, From: "no-reply@multitour.example", PublicBaseURL: "http://localhost:4200"}
+}
+
+// testConfig is the configuration of a handler under test: fresh keys and mail settings that do not need a server.
+func testConfig(private *rsa.PrivateKey, public *rsa.PublicKey) config {
+	return config{privateKey: private, publicKey: public, mail: unreachableMail()}
+}
+
+// newStackOnMail is newStackOn with the mail settings of the test.
+func newStackOnMail(t *testing.T, pool *pgxpool.Pool, mail smtpmail.Config) *stack {
+	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
 	logs := &bytes.Buffer{}
-	handler, err := buildHandler(pool, config{privateKey: key, publicKey: &key.PublicKey}, slog.New(slog.NewJSONHandler(logs, nil)))
+	cfg := testConfig(key, &key.PublicKey)
+	cfg.mail = mail
+	handler, background, err := build(pool, cfg, slog.New(slog.NewJSONHandler(logs, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +105,7 @@ func newStackOn(t *testing.T, pool *pgxpool.Pool) *stack {
 			t.Fatal(err)
 		}
 	}
-	return &stack{handler: handler, pool: pool, logs: logs, public: &key.PublicKey, private: key}
+	return &stack{handler: handler, background: background, pool: pool, logs: logs, public: &key.PublicKey, private: key}
 }
 
 func (s *stack) account(t *testing.T, tenantID, email string, o pgtest.Options, roles ...string) string {
