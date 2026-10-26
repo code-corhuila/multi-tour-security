@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
@@ -224,6 +225,24 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		{"application/json", customerBody, &fakeCreator{err: errors.New("boom")}, known, http.StatusInternalServerError},
 	} {
 		run(accountsHandler(c.svc, c.tenants, io.Discard), http.MethodPost, accountsRoute, c.contentType, c.body, "", c.want)
+	}
+
+	// asking for a new link is always 202 when the body is well formed
+	bigAsk := `{"email":"` + strings.Repeat("a", 4200) + `"}`
+	for _, c := range []struct {
+		path, contentType, body string
+		err                     error
+		want                    int
+	}{
+		{requestRoute, "application/json", askBody, nil, http.StatusAccepted},
+		{requestRoute, "application/json", askBody, errors.New("boom"), http.StatusAccepted},
+		{requestRoute, "application/json", `{"email":`, nil, http.StatusBadRequest},
+		{requestRoute, "application/json", `{"email":"no-at-sign"}`, nil, http.StatusBadRequest},
+		{requestRoute, "text/plain", askBody, nil, http.StatusUnsupportedMediaType},
+		{requestRoute, "application/json", bigAsk, nil, http.StatusRequestEntityTooLarge},
+	} {
+		handler := askHandler(&fakeRequester{err: c.err}, background(time.Second), io.Discard)
+		run(handler, http.MethodPost, c.path, c.contentType, c.body, "", c.want)
 	}
 
 	// the first Administrator of a tenant, for the saga: only a service, and every answer of the use case
