@@ -64,11 +64,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	defer pool.Close()
-	handler, err := buildHandler(pool, cfg, logger)
+	handler, background, err := build(pool, cfg, logger)
 	if err != nil {
 		return err
 	}
-	return serve(ctx, listener, handler, logger, func(context.Context) error { return nil })
+	return serve(ctx, listener, handler, logger, background.Wait)
 }
 
 // serve answers until ctx ends, then drains the requests in flight within shutdownTimeout and waits, within what is left of

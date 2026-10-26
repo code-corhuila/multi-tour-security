@@ -99,26 +99,19 @@ func (s *stack) accountCount(t *testing.T) int {
 	return n
 }
 
-func TestC_TheCustomerBelongsToTheTenantOfTheLinkAndSignsInWithThePasswordTheyChose(t *testing.T) {
+func TestC_TheCustomerBelongsToTheTenantOfTheLinkAndWaitsForTheirEmailBeforeSigningIn(t *testing.T) {
 	s := newStack(t)
 	rec := s.register(t, accountsURL, "customer-key-0001", customerFields())
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 	c := decodeCreated(t, rec)
-	if c.TenantID != tenantA || c.Email != "laura.perez@example.com" || c.FullName != "Laura Pérez" || c.AccountStatus != "ACTIVE" ||
+	if c.TenantID != tenantA || c.Email != "laura.perez@example.com" || c.FullName != "Laura Pérez" || c.AccountStatus != "PENDING" ||
 		c.EmailVerified || len(c.Roles) != 1 || c.Roles[0] != "FINAL_CUSTOMER" || c.CreatedAt == "" {
-		t.Fatalf("the account is active in the tenant of the link: %+v", c)
+		t.Fatalf("the account waits for its e-mail in the tenant of the link: %+v", c)
 	}
-	_, claims := s.claims(t, s.signIn(tenantURL, "laura.perez@example.com", customerPass))
-	if claims["sub"] != c.AccountID || claims["tenantId"] != tenantA {
-		t.Fatalf("the customer signs in as the account that was created: %v", claims)
-	}
-	if roles, _ := claims["roles"].([]any); len(roles) != 1 || roles[0] != "FINAL_CUSTOMER" {
-		t.Fatalf("roles = %v", claims["roles"])
-	}
-	if _, restricted := claims["access"]; restricted {
-		t.Fatalf("the password is ordinary, not temporary: %v", claims)
+	if rec := s.signIn(tenantURL, "laura.perez@example.com", customerPass); rec.Code != http.StatusForbidden {
+		t.Fatalf("a pending account cannot sign in: %d %s", rec.Code, rec.Body)
 	}
 	if rec := s.signIn(otherURL, "laura.perez@example.com", customerPass); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("the account does not exist in the other tenant: %d", rec.Code)
