@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
@@ -74,6 +75,7 @@ func check(e Event) (tenant.Copy, error) {
 	case e.PathTenantID != e.TenantID, e.AggregateID != e.TenantID, e.PayloadTenantID != "" && e.PayloadTenantID != e.TenantID:
 	case e.Version < 1, e.OccurredAt.IsZero(), statusErr != nil:
 	case len(e.Identifier) < 3, len(e.Identifier) > 40, !identifier.MatchString(e.Identifier):
+	case hasControl(e.CommercialName):
 	case e.Type == "TenantCreated":
 		return copyOf(e, status), nil
 	case e.Type == "TenantInactivated" && status == tenant.Inactive, e.Type == "TenantReactivated" && status == tenant.Active:
@@ -83,5 +85,12 @@ func check(e Event) (tenant.Copy, error) {
 }
 
 func copyOf(e Event, status tenant.Status) tenant.Copy {
-	return tenant.Copy{TenantID: e.TenantID, Identifier: e.Identifier, Status: status, OccurredAt: e.OccurredAt}
+	return tenant.Copy{TenantID: e.TenantID, Identifier: e.Identifier, Status: status, OccurredAt: e.OccurredAt,
+		CommercialName: strings.TrimSpace(e.CommercialName)}
+}
+
+// hasControl tells a name with a control character, a line break above all: the name goes to the visible sender of an
+// e-mail, and the store would keep it as it came.
+func hasControl(s string) bool {
+	return strings.IndexFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0
 }

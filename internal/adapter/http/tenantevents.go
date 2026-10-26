@@ -30,9 +30,10 @@ type tenantEventBody struct {
 	AggregateID  string `json:"aggregateId"`
 	OccurredAt   string `json:"occurredAt"`
 	Payload      struct {
-		TenantID     string `json:"tenantId"`
-		Identifier   string `json:"identifier"`
-		TenantStatus string `json:"tenantStatus"`
+		TenantID       string `json:"tenantId"`
+		Identifier     string `json:"identifier"`
+		CommercialName string `json:"commercialName"`
+		TenantStatus   string `json:"tenantStatus"`
 	} `json:"payload"`
 }
 
@@ -52,7 +53,7 @@ func (s *server) receiveTenantEvent(w http.ResponseWriter, r *http.Request) {
 	applied, err := s.tenantEvents.Receive(r.Context(), tenantevent.Event{
 		PathTenantID: r.PathValue("tenantId"), EventID: body.EventID, Type: body.EventType, Version: body.EventVersion,
 		TenantID: body.TenantID, AggregateID: body.AggregateID, PayloadTenantID: body.Payload.TenantID,
-		Identifier: body.Payload.Identifier, Status: body.Payload.TenantStatus, OccurredAt: at,
+		Identifier: body.Payload.Identifier, CommercialName: body.Payload.CommercialName, Status: body.Payload.TenantStatus, OccurredAt: at,
 	})
 	switch {
 	case errors.Is(err, tenantevent.ErrInvalid):

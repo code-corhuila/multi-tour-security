@@ -69,7 +69,7 @@ func TestC_AnAppliedEventIsA201AndARepeatOrAnOlderOneIsA200BothWithNoBody(t *tes
 			t.Errorf("applied=%v: %d %q %v", applied, rec.Code, rec.Body, rec.Header())
 		}
 		want := tenantevent.Event{PathTenantID: eventTenant, EventID: eventKey, Type: "TenantInactivated", Version: 1, TenantID: eventTenant, AggregateID: eventTenant,
-			PayloadTenantID: eventTenant, Identifier: "travesia-natural", Status: "INACTIVE", OccurredAt: time.Date(2026, 10, 10, 10, 0, 0, 500000000, time.UTC)}
+			PayloadTenantID: eventTenant, Identifier: "travesia-natural", CommercialName: "Travesía Natural SAS", Status: "INACTIVE", OccurredAt: time.Date(2026, 10, 10, 10, 0, 0, 500000000, time.UTC)}
 		if len(svc.got) != 1 || svc.got[0] != want {
 			t.Errorf("the use case got %+v", svc.got)
 		}
