@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/code-corhuila/multi-tour-security/internal/core/verification"
 )
 
 func TestC_ServerAnswersAndStopsWhenAsked(t *testing.T) {
@@ -40,5 +42,11 @@ func TestC_ServerAnswersAndStopsWhenAsked(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the server did not stop after the context ended")
+	}
+}
+
+func TestC_TheSendOfTheFirstLinkEndsWellBeforeTheServerCutsTheConnection(t *testing.T) {
+	if verification.SendTimeout+3*time.Second > writeTimeout {
+		t.Fatalf("a send of up to %s inside a request that the server cuts after %s leaves the person with a reset instead of the answer", verification.SendTimeout, writeTimeout)
 	}
 }
