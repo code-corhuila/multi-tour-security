@@ -56,6 +56,9 @@ func (r *Registry) Create(ctx context.Context, n port.NewAccount, scope, key str
 	if n.TenantID == "" {
 		return port.Registered{}, errors.New("an account created by this registry belongs to a tenant")
 	}
+	if n.Pending && n.Link == nil {
+		return port.Registered{}, errors.New("a pending account needs its first link, or it could never be verified")
+	}
 	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return port.Registered{}, err
@@ -91,9 +94,13 @@ func insertAccount(ctx context.Context, tx pgx.Tx, n port.NewAccount, scope, key
 		until = &n.TemporaryUntil
 	}
 	var id, membership string
-	err := tx.QueryRow(ctx, `INSERT INTO security.identity (tenant_id, email_normalized, password_hash, temporary_until, full_name, phone)
-		VALUES ($1::uuid, $2, $3, $4, $5, NULLIF($6, '')) RETURNING identity_id::text`,
-		n.TenantID, n.EmailNormalized, n.PasswordHash, until, n.FullName, n.Phone).Scan(&id)
+	status := "ACTIVE"
+	if n.Pending {
+		status = "PENDING"
+	}
+	err := tx.QueryRow(ctx, `INSERT INTO security.identity (tenant_id, email_normalized, password_hash, temporary_until, full_name, phone, identity_status)
+		VALUES ($1::uuid, $2, $3, $4, $5, NULLIF($6, ''), $7) RETURNING identity_id::text`,
+		n.TenantID, n.EmailNormalized, n.PasswordHash, until, n.FullName, n.Phone, status).Scan(&id)
 	if err != nil {
 		return "", uniqueViolation(err, "uq_identity_tenant_email", port.ErrEmailTaken)
 	}
@@ -106,7 +113,21 @@ func insertAccount(ctx context.Context, tx pgx.Tx, n port.NewAccount, scope, key
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO security.idempotency_key (scope, idempotency_key, identity_id) VALUES ($1, $2, $3::uuid)`, scope, key, id)
 	// backstop of the lock: the primary key of the key table still decides if the lock was bypassed
-	return id, uniqueViolation(err, "pk_idempotency_key", port.ErrKeyTaken)
+	if err != nil {
+		return id, uniqueViolation(err, "pk_idempotency_key", port.ErrKeyTaken)
+	}
+	if n.Pending {
+		// the first link is written with the account: an account that waits for it is never left without one
+		// created with the instant of the link (the clock of the use case), not the one of the database, so that the limit of
+		// three an hour counts it on the same clock as the links that Issue writes
+		var createdAt *time.Time
+		if !n.Link.CreatedAt.IsZero() {
+			createdAt = &n.Link.CreatedAt
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO security.email_verification (identity_id, token_hash, created_at, expires_at)
+			VALUES ($1::uuid, $2, COALESCE($3::timestamptz, now()), $4::timestamptz)`, id, n.Link.TokenHash, createdAt, n.Link.ExpiresAt)
+	}
+	return id, err
 }
 
 // uniqueViolation turns the refusal of one named constraint into the port's error; the driver's error stays reachable.
