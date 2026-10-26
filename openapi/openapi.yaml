@@ -489,6 +489,59 @@ paths:
           $ref: '#/components/responses/Error'
         "415":
           $ref: '#/components/responses/Error'
+  /api/v1/security/public/tenants/{identifier}/email-verifications/confirmations:
+    post:
+      summary: Verify the e-mail with the link and the password
+      description: >
+        The page behind the link posts the value of the link (it travels after the hash in the e-mail, so it is never in
+        a server log) together with the password of the account (HU-SEC-003, R-1: whoever registered another
+        person's e-mail cannot activate it). On success the account becomes ACTIVE with emailVerified true, the link
+        stops working and AccountEmailVerified waits in the outbox. A link that is used, expired, replaced by a newer
+        one, unknown, of an account of another tenant or of a tenant that is not active is one 422
+        (BUSINESS_RULE_VIOLATION). A valid link with a wrong password is 401, leaves the account pending and counts a
+        failure toward the block of five in fifteen minutes; a blocked account is the same 401. An unknown identifier
+        is 404.
+      operationId: confirmEmailVerification
+      tags: [Accounts]
+      security: []
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          description: Identifier of the tenant, lowercase kebab-case
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 40
+            pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailVerificationConfirmation'
+      responses:
+        "204":
+          description: The account is verified and active
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
 components:
   parameters:
     IdempotencyKey:
@@ -613,6 +666,16 @@ components:
       additionalProperties: false
       properties:
         email: {type: string, minLength: 3, maxLength: 254}
+    EmailVerificationConfirmation:
+      type: object
+      required: [token, password]
+      additionalProperties: false
+      properties:
+        token:
+          type: string
+          description: The value of the link, base64url without padding (32 random bytes)
+          pattern: '^[A-Za-z0-9_-]{43}$'
+        password: {type: string, minLength: 1, maxLength: 128}
     TenantEventEnvelope:
       type: object
       description: The envelope of ADR-004 D4 as job 7 delivers it; fields it does not name are tolerated
