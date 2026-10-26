@@ -104,3 +104,14 @@ func redact(err error, m port.Mail, password string) error {
 	}
 	return errors.New("smtp: " + text)
 }
+
+// Error is a failed delivery: the code of the server when it gave one, and the reason without what must not be recorded.
+type Error struct {
+	Code int
+	Text string
+}
+
+func (e *Error) Error() string { return "smtp: " + e.Text }
+
+// Temporary tells a failure that a later try may fix (4xx, network) from one that it will not (5xx).
+func (e *Error) Temporary() bool { return false }
