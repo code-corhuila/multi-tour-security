@@ -2,6 +2,7 @@ package httpadapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -9,11 +10,20 @@ import (
 	"time"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/account"
+	"github.com/code-corhuila/multi-tour-security/internal/core/verifyemail"
 )
+
+// confirmTimeout bounds the confirmation of an e-mail, which compares a password and writes.
+const confirmTimeout = 15 * time.Second
 
 // LinkRequester is what the route that asks for a new link needs from its use case.
 type LinkRequester interface {
 	Request(ctx context.Context, tenantIdentifier, email string) error
+}
+
+// EmailConfirmer is what the route that confirms the e-mail needs from its use case.
+type EmailConfirmer interface {
+	Confirm(ctx context.Context, r verifyemail.Request) error
 }
 
 // Background runs the work that is done after the answer, with its own deadline, and lets the shutdown wait for it. At most
@@ -72,6 +82,11 @@ func WithLinkRequests(requester LinkRequester, background *Background) Option {
 	return func(s *server) { s.linkRequester, s.background = requester, background }
 }
 
+// WithEmailConfirmation registers the public route that confirms the e-mail with the link and the password.
+func WithEmailConfirmation(confirmer EmailConfirmer) Option {
+	return func(s *server) { s.emailConfirmer = confirmer }
+}
+
 type linkRequestBody struct {
 	Email *string `json:"email"`
 }
@@ -106,4 +121,50 @@ func (s *server) askForLink(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusAccepted)
+}
+
+type emailConfirmationBody struct {
+	Token    *string `json:"token"`
+	Password *string `json:"password"`
+}
+
+// confirmEmail is the only place where the answer of the confirmation becomes HTTP. A link that does not work is one
+// single 422 whatever the reason, a wrong password is the 401 of any sign-in, and the cause of an unexpected failure goes
+// to the log by its type, with the trace id. The use case runs on a context that outlives the request: a guess followed by a
+// closed connection must still be counted toward the block of the account.
+func (s *server) confirmEmail(w http.ResponseWriter, r *http.Request) {
+	var body emailConfirmationBody
+	if !readJSON(w, r, &body) {
+		return
+	}
+	if body.Token == nil || body.Password == nil {
+		writeError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "the body must be a JSON object with a token and a password")
+		return
+	}
+	identifier := r.PathValue("identifier")
+	if !validIdentifier(identifier) {
+		writeError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "the identifier of the tenant is not valid")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), confirmTimeout)
+	defer cancel()
+	err := s.emailConfirmer.Confirm(ctx, verifyemail.Request{
+		TenantIdentifier: identifier, Token: *body.Token, Password: *body.Password, CorrelationID: traceID(r.Context()),
+	})
+	switch {
+	case err == nil:
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusNoContent)
+	case errors.Is(err, verifyemail.ErrInvalidRequest):
+		writeError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "the link or the password is not valid")
+	case errors.Is(err, verifyemail.ErrTenantNotFound):
+		writeError(w, r, http.StatusNotFound, "NOT_FOUND", "the tenant does not exist")
+	case errors.Is(err, verifyemail.ErrBadLink):
+		writeError(w, r, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", "the link does not work, ask for a new one")
+	case errors.Is(err, verifyemail.ErrWrongPassword):
+		writeError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication failed")
+	default:
+		s.logger.ErrorContext(r.Context(), "confirming the e-mail failed", "traceId", traceID(r.Context()), "errorType", fmt.Sprintf("%T", err))
+		writeError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "an internal error occurred")
+	}
 }
