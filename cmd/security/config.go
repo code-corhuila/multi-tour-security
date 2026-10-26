@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/code-corhuila/multi-tour-security/internal/adapter/smtpmail"
 )
 
 const (
@@ -23,6 +25,7 @@ type config struct {
 	databaseURL string
 	privateKey  *rsa.PrivateKey
 	publicKey   *rsa.PublicKey
+	mail        smtpmail.Config
 }
 
 // String and GoString keep the database password and the keys out of any printed value.
