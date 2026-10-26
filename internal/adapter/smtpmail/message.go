@@ -30,7 +30,8 @@ func buildMessage(from, baseURL string, m port.Mail, at time.Time, messageID str
 	if name == "" || name == platform {
 		sender = platform
 	}
-	boundary := "mt-" + hex.EncodeToString(sha256.New().Sum([]byte(messageID))[:8])
+	digest := sha256.Sum256([]byte(messageID))
+	boundary := "mt-" + hex.EncodeToString(digest[:8])
 
 	var b bytes.Buffer
 	header := func(name, value string) { fmt.Fprintf(&b, "%s: %s\r\n", name, value) }

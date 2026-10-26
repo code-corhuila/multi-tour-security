@@ -1,6 +1,7 @@
 package smtpmail
 
 import (
+	"encoding/hex"
 	"io"
 	"mime"
 	"mime/multipart"
@@ -130,5 +131,21 @@ func TestD_TheBodiesEscapeWhatTheTenantNameCouldInjectIntoTheHtml(t *testing.T) 
 	_, texts := parts(t, raw)
 	if strings.Contains(texts["text/html"], "<script>") || !strings.Contains(texts["text/html"], "&lt;script&gt;") {
 		t.Fatalf("the html alternative did not escape the name: %q", texts["text/html"])
+	}
+}
+
+func TestD_TheBoundaryIsADigestOfTheMessageIdAndDiffersFromOneMessageToAnother(t *testing.T) {
+	boundary := func(id string) string {
+		raw, _ := buildMessage("no-reply@multitour.example", "https://app.multitour.example", verification(), sent, id)
+		msg, err := mail.ReadMessage(strings.NewReader(string(raw)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, params, _ := mime.ParseMediaType(msg.Header.Get("Content-Type"))
+		return params["boundary"]
+	}
+	a, b := boundary("id-1@multitour.example"), boundary("id-2@multitour.example")
+	if written := "mt-" + hex.EncodeToString([]byte("id-1@multitour.example")[:8]); a == b || a == written {
+		t.Fatalf("boundaries %q and %q: they must be a digest, not the first bytes of the id written in hexadecimal (%q)", a, b, written)
 	}
 }
