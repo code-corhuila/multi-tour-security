@@ -72,3 +72,13 @@ func (v *Verifications) Find(ctx context.Context, tokenHash string) (port.LinkSt
 	s.ExpiresAt, s.UsedAt, s.ReplacedAt = s.ExpiresAt.UTC(), utc(used), utc(replaced)
 	return s, true, nil
 }
+
+var _ port.Verifications = (*Verifications)(nil)
+
+func (v *Verifications) Confirm(context.Context, string, time.Time, string) (bool, error) {
+	return false, errors.New("not implemented")
+}
+
+func (v *Verifications) MarkSendFailed(context.Context, string, time.Time, string) error {
+	return errors.New("not implemented")
+}
