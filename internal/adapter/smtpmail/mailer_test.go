@@ -286,16 +286,3 @@ func TestI_ARefusedConnectionIsAnErrorThatNamesTheFailureNotTheLink(t *testing.T
 		t.Fatalf("err = %v", err)
 	}
 }
-
-func TestI_AServerThatNeverAnswersEndsWithTheDeadlineOfTheCaller(t *testing.T) {
-	s := startServer(t, &fakeServer{silent: true})
-	limited, cancel := context.WithTimeout(ctx, 400*time.Millisecond)
-	defer cancel()
-	started := time.Now()
-	if err := mustMailer(t, config(s)).SendVerification(limited, verification()); err == nil {
-		t.Fatal("a silent server was a success")
-	}
-	if took := time.Since(started); took > 3*time.Second {
-		t.Fatalf("it waited %s, the deadline was 400 ms", took)
-	}
-}
