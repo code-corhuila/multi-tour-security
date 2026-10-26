@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/account"
+	"github.com/code-corhuila/multi-tour-security/internal/core/verifyemail"
 )
 
 // LinkRequester is what the route that asks for a new link needs from its use case.
@@ -106,4 +107,14 @@ func (s *server) askForLink(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// EmailConfirmer is what the route that confirms the e-mail needs from its use case.
+type EmailConfirmer interface {
+	Confirm(ctx context.Context, r verifyemail.Request) error
+}
+
+// WithEmailConfirmation registers the public route that confirms the e-mail with the link and the password.
+func WithEmailConfirmation(confirmer EmailConfirmer) Option {
+	return func(s *server) {}
 }
