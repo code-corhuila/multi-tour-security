@@ -110,6 +110,10 @@ func (s *server) answerTokens(w http.ResponseWriter, r *http.Request, tokens sig
 	switch {
 	case errors.Is(err, signin.ErrRefused):
 		writeError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication failed")
+	case errors.Is(err, signin.ErrEmailNotVerified):
+		// the one refusal that is not the generic 401, and only after the right password: the details let the portal offer a new link
+		writeEnvelope(w, r, http.StatusForbidden, errorBody{Error: "FORBIDDEN", Message: "the e-mail of the account is not verified",
+			Details: []fieldDetail{{Field: "email", Message: "EMAIL_NOT_VERIFIED"}}})
 	case errors.Is(err, signin.ErrInvalidRequest):
 		writeError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "the request is not valid")
 	case err != nil:
