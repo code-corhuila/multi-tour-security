@@ -42,7 +42,7 @@ func (e *FieldError) Error() string { return e.Field + ": " + e.Err.Error() }
 func (e *FieldError) Unwrap() error { return e.Err }
 
 // Command is one request. FirstName and LastName are the customer's; FullName is the other kinds'. Role is asked only
-// for an internal user, and Actor is who asks for the other two kinds. Confirmation is the customer's only.
+// for an internal user, and Actor is who asks for the other two kinds. Confirmation is asked of the customer and of the internal user; the first Administrator has none.
 type Command struct {
 	Kind           Kind
 	TenantID       string
@@ -99,7 +99,7 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 	if err != nil {
 		return port.Registered{}, false, err
 	}
-	if r.selfService && c.Password != c.Confirmation {
+	if r.confirmed && c.Password != c.Confirmation {
 		return port.Registered{}, false, refuse("passwordConfirmation", errMismatch)
 	}
 	// a pending kind asks the copy of an active tenant, whose identifier and name go in the e-mail
@@ -117,9 +117,9 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 	if !account.ValidEmail(email) {
 		return port.Registered{}, false, refuse("email", errInvalid)
 	}
-	if _, taken, err := s.Accounts.FindByEmail(ctx, c.TenantID, email); err != nil || taken {
+	if existing, taken, err := s.Accounts.FindByEmail(ctx, c.TenantID, email); err != nil || taken {
 		if err == nil {
-			err = port.ErrEmailTaken
+			err = s.whyTaken(ctx, c.Kind, existing)
 		}
 		return port.Registered{}, false, err
 	}
