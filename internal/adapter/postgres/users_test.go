@@ -89,7 +89,7 @@ func TestI_ListIsNewestFirstWithAStablePageAndTheRightTotal(t *testing.T) {
 		createdAt(t, pool, id, at)
 	}
 	seen := map[string]bool{}
-	var order []string
+	var all []port.Registered
 	for page := 0; page < 3; page++ {
 		got, total, err := dir.List(ctx, tenant, port.UserFilter{Roles: internalRoles}, 2, page*2)
 		if err != nil {
@@ -98,22 +98,41 @@ func TestI_ListIsNewestFirstWithAStablePageAndTheRightTotal(t *testing.T) {
 		if total != 5 {
 			t.Fatalf("page %d: total = %d", page, total)
 		}
-		for _, e := range emails(got) {
-			if seen[e] {
-				t.Fatalf("%s is on two pages: %v", e, order)
+		for _, u := range got {
+			if seen[u.Account.ID] {
+				t.Fatalf("%s is on two pages: %v", u.Account.EmailNormalized, emails(all))
 			}
-			seen[e] = true
-			order = append(order, e)
+			seen[u.Account.ID] = true
+			all = append(all, u)
 		}
 	}
-	if len(order) != 5 || order[0] != "e@example.com" || order[4] != "a@example.com" {
-		t.Fatalf("order = %v, want the newest first and the oldest last", order)
+	if len(all) != 5 || all[0].Account.EmailNormalized != "e@example.com" || all[4].Account.EmailNormalized != "a@example.com" {
+		t.Fatalf("order = %v, want the newest first and the oldest last", emails(all))
 	}
-	again, _, _ := dir.List(ctx, tenant, port.UserFilter{Roles: internalRoles}, 5, 0)
+	// the tie between c and d is broken by the identifier, newest identifier first, so a page never moves
+	for i := 1; i < len(all); i++ {
+		prev, cur := all[i-1], all[i]
+		if cur.CreatedAt.After(prev.CreatedAt) || (cur.CreatedAt.Equal(prev.CreatedAt) && cur.Account.ID > prev.Account.ID) {
+			t.Fatalf("%s comes after %s: not created_at DESC, identity_id DESC", cur.Account.EmailNormalized, prev.Account.EmailNormalized)
+		}
+	}
+	again, _, err := dir.List(ctx, tenant, port.UserFilter{Roles: internalRoles}, 5, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for i, e := range emails(again) {
-		if e != order[i] {
-			t.Fatalf("a second read gives another order: %v vs %v", emails(again), order)
+		if e != all[i].Account.EmailNormalized {
+			t.Fatalf("a second read gives another order: %v vs %v", emails(again), emails(all))
 		}
+	}
+}
+
+func TestI_AnAccountWithTwoInternalRolesIsListedOnce(t *testing.T) {
+	dir, pool := directory(t)
+	user(t, pool, tenant, "both@example.com", pgtest.Options{}, "MANAGER", "ANALYST")
+	got, total, err := dir.List(ctx, tenant, port.UserFilter{Roles: internalRoles}, 20, 0)
+	if err != nil || len(got) != 1 || total != 1 || got[0].Role != "ANALYST" {
+		t.Fatalf("users=%d total=%d err=%v role=%v: one row, with the smallest role by name", len(got), total, err, got)
 	}
 }
 
