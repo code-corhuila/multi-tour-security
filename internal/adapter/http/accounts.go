@@ -88,6 +88,7 @@ type accountBody struct {
 // goes to the log with the trace id and never to the caller.
 func (s *server) answerAccount(w http.ResponseWriter, r *http.Request, reg port.Registered, created bool, err error) {
 	var invalid *createaccount.FieldError
+	var taken *createaccount.EmailTakenError
 	var out accountBody
 	if err == nil {
 		out, err = toAccountBody(reg)
@@ -100,6 +101,10 @@ func (s *server) answerAccount(w http.ResponseWriter, r *http.Request, reg port.
 		writeError(w, r, http.StatusNotFound, "NOT_FOUND", "the tenant does not exist")
 	case errors.Is(err, createaccount.ErrTenantNotActive):
 		writeError(w, r, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", "the tenant is not active")
+	case errors.As(err, &taken):
+		// only the registration of a user is told whose the e-mail is (the use case decides who is told)
+		writeEnvelope(w, r, http.StatusUnprocessableEntity, errorBody{Error: "BUSINESS_RULE_VIOLATION",
+			Message: "the e-mail is already in use in this tenant", Details: []fieldDetail{{Field: "email", Message: takenMessage(taken.Reason)}}})
 	case errors.Is(err, port.ErrEmailTaken):
 		// the details tell the portal a taken e-mail from an inactive tenant, whose 422 carries none
 		writeEnvelope(w, r, http.StatusUnprocessableEntity, errorBody{Error: "BUSINESS_RULE_VIOLATION",

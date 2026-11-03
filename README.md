@@ -11,6 +11,8 @@ The transversal security microservice (Annex J): accounts, sign-in, tokens and r
 
 It answers `GET /health` without a token; the sign-in, platform sign-in and renewal routes need none either; every other route answers `401` with the common error envelope unless it carries a valid RS256 token. The routes are in `openapi/openapi.yaml`.
 
+A Tenant Administrator registers the internal users of their tenant with `POST /api/v1/security/users` (HU-SEC-005): the password they type and its confirmation are a temporary credential of 72 hours that only allows the user to choose their own at the first sign-in, and the user then holds the role they were given and no other. The tenant is always the one of the credential. A taken e-mail is refused saying whose it is.
+
 ## How to start it
 
 Needs Go 1.26 and the infrastructure of `multi-tour-infra-postgres` (the instance and the user `security_app`, created by its `postgres/init/01-instance.sh`; run that script again by hand if the instance already existed, Annex J, J.5.5).
