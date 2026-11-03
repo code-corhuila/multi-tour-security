@@ -298,6 +298,15 @@ the_account_keeps_who_when_and_why_of_a_change_and_of_a_temporary_credential() {
   refused chk_identity_temporary_trace "UPDATE security.identity SET temporary_issued_at = NULL" || return 1
   refused chk_identity_temporary_issued_by "UPDATE security.identity SET temporary_issued_by = repeat('a', 101)"
 }
+the_listing_of_users_has_its_index() {
+  clean || return 1
+  def=$(psql_admin -c "SELECT indexdef FROM pg_indexes WHERE schemaname = 'security' AND indexname = 'idx_identity_tenant_id_created_at'")
+  [ -n "$def" ] || { echo "the index of the listing of users does not exist"; return 1; }
+  case "$def" in
+    *"(tenant_id, created_at DESC, identity_id DESC)"*) ;;
+    *) echo "the index must be on (tenant_id, created_at DESC, identity_id DESC): $def"; return 1 ;;
+  esac
+}
 existing_unverified_customer_accounts_become_pending() {
   clean || return 1
   role() { # the account of an e-mail gets a membership with this role
@@ -362,6 +371,7 @@ check "I·a_pending_status_is_accepted_and_the_moment_of_verification_is_kept" a
 check "I·link_rows_are_valid_unique_and_follow_their_account" link_rows_are_valid_unique_and_follow_their_account
 check "I·the_tenant_copy_keeps_an_optional_commercial_name" the_tenant_copy_keeps_an_optional_commercial_name
 check "I·the_account_keeps_who_when_and_why_of_a_change_and_of_a_temporary_credential" the_account_keeps_who_when_and_why_of_a_change_and_of_a_temporary_credential
+check "I·the_listing_of_users_has_its_index" the_listing_of_users_has_its_index
 check "I·existing_unverified_customer_accounts_become_pending" existing_unverified_customer_accounts_become_pending
 # a pending account, a link row, a verified moment and a commercial name exist when the rollback runs, which must still
 # leave the instance empty
