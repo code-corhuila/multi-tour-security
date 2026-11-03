@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -89,11 +90,10 @@ func TestC_AnAdministratorRegistersAUserWhoSignsInOnlyToChooseAPasswordAndThenHo
 	}
 
 	// the first sign-in only allows choosing a password
-	_, first := s.claims(t, s.signIn(tenantURL, "carlos.gomez@example.com", temporaryPass))
+	a, first := s.claims(t, s.signIn(tenantURL, "carlos.gomez@example.com", temporaryPass))
 	if first["access"] != "password-change" {
 		t.Fatalf("the first sign-in is only to choose a password: %v", first)
 	}
-	a, _ := s.claims(t, s.signIn(tenantURL, "carlos.gomez@example.com", temporaryPass))
 	if rec := s.changePassword(a.AccessToken, chosen); rec.Code != http.StatusNoContent {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
@@ -122,7 +122,7 @@ func TestC_EachOfTheFiveRolesCanBeGivenAndAnythingElseIsRefusedWithNothingCreate
 	before := s.accountCount(t)
 	for i, role := range []string{"TENANT_ADMINISTRATOR", "OPERATIONAL_COLLABORATOR", "MANAGER", "ACCOUNTANT", "ANALYST"} {
 		email := strings.ToLower(role) + "@example.com"
-		if rec := s.registerUser(t, admin, "role-key-00000"+string(rune('1'+i)), userFields(email, role)); rec.Code != http.StatusCreated {
+		if rec := s.registerUser(t, admin, fmt.Sprintf("role-key-%08d", i), userFields(email, role)); rec.Code != http.StatusCreated {
 			t.Fatalf("%s: %d %s", role, rec.Code, rec.Body)
 		}
 		_, claims := s.claims(t, s.signIn(tenantURL, email, temporaryPass))
@@ -130,8 +130,8 @@ func TestC_EachOfTheFiveRolesCanBeGivenAndAnythingElseIsRefusedWithNothingCreate
 			t.Fatalf("%s: %v", role, claims)
 		}
 	}
-	for _, role := range []string{"FINAL_CUSTOMER", "PLATFORM_ADMINISTRATOR", "SUPERUSER", ""} {
-		if rec := s.registerUser(t, admin, "bad-role-key-01", userFields("x@example.com", role)); rec.Code != http.StatusBadRequest {
+	for i, role := range []string{"FINAL_CUSTOMER", "PLATFORM_ADMINISTRATOR", "SUPERUSER", ""} {
+		if rec := s.registerUser(t, admin, fmt.Sprintf("bad-role-key-%04d", i), userFields("x@example.com", role)); rec.Code != http.StatusBadRequest {
 			t.Errorf("role %q: %d %s", role, rec.Code, rec.Body)
 		}
 	}
@@ -176,9 +176,10 @@ func TestC_ATakenEmailIsRefusedSayingWhoseItIsAndCreatesNothing(t *testing.T) {
 	s.account(t, tenantA, "customer@example.com", pgtest.Options{}, "FINAL_CUSTOMER")
 	s.account(t, tenantA, "pending@example.com", pgtest.Options{Pending: true}, "FINAL_CUSTOMER")
 	before := s.accountCount(t)
-	for email, word := range map[string]string{"active@example.com": "internal user", "inactive@example.com": "reactivated",
-		"customer@example.com": "customer", "pending@example.com": "customer", "ACTIVE@example.com": "internal user"} {
-		rec := s.registerUser(t, admin, "taken-key-"+email[:6]+"1", userFields(email, "MANAGER"))
+	for i, c := range []struct{ email, word string }{{"active@example.com", "internal user"}, {"inactive@example.com", "reactivated"},
+		{"customer@example.com", "customer"}, {"pending@example.com", "customer"}, {"ACTIVE@example.com", "internal user"}} {
+		email, word := c.email, c.word
+		rec := s.registerUser(t, admin, fmt.Sprintf("taken-key-%08d", i), userFields(email, "MANAGER"))
 		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(strings.ToLower(rec.Body.String()), word) {
 			t.Errorf("%s: %d %s", email, rec.Code, rec.Body)
 		}
