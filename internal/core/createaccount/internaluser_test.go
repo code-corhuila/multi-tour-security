@@ -98,3 +98,15 @@ func TestA_TheCustomerSignUpKeepsItsPlainRefusal(t *testing.T) {
 		t.Fatalf("a public caller must not learn whose the e-mail is: %v", taken.Reason)
 	}
 }
+
+// A status the use case does not know is a failure of the platform, never read as an active user: the refusal would tell the
+// Administrator something that nobody checked.
+func TestA_AnAccountWithAStatusItDoesNotKnowIsAFailureAndNotARefusal(t *testing.T) {
+	w := newWorld()
+	takenBy(w, account.Status(99), "MANAGER")
+	_, _, err := w.service.Create(ctx, internalUser())
+	if err == nil || errors.Is(err, port.ErrEmailTaken) {
+		t.Fatalf("err = %v, want a failure that is not the refusal of a taken e-mail", err)
+	}
+	nothingWritten(t, w)
+}

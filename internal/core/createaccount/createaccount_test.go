@@ -63,7 +63,7 @@ func TestA_PasswordPolicyIsTheOneOfThePasswordPackage(t *testing.T) {
 func TestA_ThePolicyAppliesToTheTemporaryPasswordOfTheOtherKindsToo(t *testing.T) {
 	for _, c := range []createaccount.Command{internalUser(), firstAdministrator()} {
 		w := newWorld()
-		c.Password = "weakpass"
+		c.Password, c.Confirmation = "weakpass", "weakpass"
 		if _, _, err := w.service.Create(ctx, c); !errors.Is(err, password.ErrPolicy) {
 			t.Fatalf("kind %d: err = %v", c.Kind, err)
 		}
