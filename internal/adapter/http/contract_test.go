@@ -320,7 +320,7 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 	}{
 		{"", admin, list, http.StatusOK},
 		{"?page=2&limit=10&role=MANAGER&status=ACTIVE", admin, list, http.StatusOK},
-		{"?limit=500", admin, list, http.StatusBadRequest},
+		{"?sort=email", admin, list, http.StatusBadRequest},
 		{"?role=FINAL_CUSTOMER", admin, &fakeLister{err: &listusers.FieldError{Field: "role"}}, http.StatusBadRequest},
 		{"", "", list, http.StatusUnauthorized},
 		{"", tokenWith(t, []string{"MANAGER"}, accountTenant, ""), list, http.StatusForbidden},

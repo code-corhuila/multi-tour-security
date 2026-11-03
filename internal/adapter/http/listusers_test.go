@@ -91,8 +91,8 @@ func TestC_AnEmptyListIsAnEmptyArrayAndNeverNull(t *testing.T) {
 }
 
 func TestC_AFilterThatIsNotDeclaredOrAValueThatCannotBeReadIsA400AndTheUseCaseIsNotAsked(t *testing.T) {
-	for _, query := range []string{"?tenantId=" + otherTenantID, "?sort=email", "?page=0", "?page=-1", "?page=abc", "?limit=0", "?limit=101", "?limit=20&limit=30",
-		"?role=MANAGER&role=ANALYST", "?page=99999999999999999999", "?%zz"} {
+	for _, query := range []string{"?tenantId=" + otherTenantID, "?sort=email", "?page=-1", "?page=abc", "?limit=20&limit=30",
+		"?role=MANAGER&role=ANALYST", "?role=", "?status=", "?role", "?page=", "?limit=", "?page=99999999999999999999", "?%zz"} {
 		svc := &fakeLister{page: onePage()}
 		rec := getUsers(listHandler(svc, io.Discard), administrator(t), query)
 		if rec.Code != http.StatusBadRequest || len(svc.queries) != 0 {
@@ -105,6 +105,18 @@ func TestC_ARefusalOfTheUseCaseIs400NamingTheField(t *testing.T) {
 	rec := getUsers(listHandler(&fakeLister{err: &listusers.FieldError{Field: "role"}}, io.Discard), administrator(t), "?role=FINAL_CUSTOMER")
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"field":"role"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestC_APageOrALimitOutOfRangeIsA400NamingItAndATenantThatIsNotAnIdIsNeverTheCallersFault(t *testing.T) {
+	for _, field := range []string{"page", "limit"} {
+		rec := getUsers(listHandler(&fakeLister{err: &listusers.FieldError{Field: field}}, io.Discard), administrator(t), "?"+field+"=0")
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"field":"`+field+`"`) {
+			t.Errorf("%s: %d %s", field, rec.Code, rec.Body)
+		}
+	}
+	if rec := getUsers(listHandler(&fakeLister{err: &listusers.FieldError{Field: "tenantId"}}, io.Discard), administrator(t), ""); rec.Code != http.StatusInternalServerError {
+		t.Fatalf("a credential whose tenant is not an id is a failure of ours, not a 400: %d %s", rec.Code, rec.Body)
 	}
 }
 
