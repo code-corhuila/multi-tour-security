@@ -281,6 +281,23 @@ the_tenant_copy_keeps_an_optional_commercial_name() {
   refused chk_tenant_copy_commercial_name "UPDATE security.tenant_copy SET commercial_name = ''" || return 1
   refused chk_tenant_copy_commercial_name "UPDATE security.tenant_copy SET commercial_name = repeat('n', 101)"
 }
+the_account_keeps_who_when_and_why_of_a_change_and_of_a_temporary_credential() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" luis@example.com)" >/dev/null || { echo "an account that never changed was refused"; return 1; }
+  [ "$(psql_admin -c "SELECT status_changed_at IS NULL AND status_changed_by IS NULL AND status_reason IS NULL AND temporary_issued_at IS NULL AND temporary_issued_by IS NULL FROM security.identity")" = t ] || { echo "the trace must start empty"; return 1; }
+  psql_admin -c "UPDATE security.identity SET status_changed_at = now(), status_changed_by = 'tenant-administrator/7a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d', status_reason = repeat('r', 500)" >/dev/null || { echo "a change of status with its trace was refused"; return 1; }
+  psql_admin -c "UPDATE security.identity SET temporary_issued_at = now(), temporary_issued_by = 'platform-administrator/7a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d'" >/dev/null || { echo "a temporary credential with its trace was refused"; return 1; }
+  # who, when and why of a change are kept together, and so are who and when of a temporary credential
+  refused chk_identity_status_trace "UPDATE security.identity SET status_reason = NULL" || return 1
+  refused chk_identity_status_trace "UPDATE security.identity SET status_changed_by = NULL" || return 1
+  refused chk_identity_status_trace "UPDATE security.identity SET status_changed_at = NULL" || return 1
+  refused chk_identity_status_reason "UPDATE security.identity SET status_reason = ''" || return 1
+  refused chk_identity_status_reason "UPDATE security.identity SET status_reason = repeat('r', 501)" || return 1
+  refused chk_identity_status_changed_by "UPDATE security.identity SET status_changed_by = ''" || return 1
+  refused chk_identity_temporary_trace "UPDATE security.identity SET temporary_issued_by = NULL" || return 1
+  refused chk_identity_temporary_trace "UPDATE security.identity SET temporary_issued_at = NULL" || return 1
+  refused chk_identity_temporary_issued_by "UPDATE security.identity SET temporary_issued_by = repeat('a', 101)"
+}
 existing_unverified_customer_accounts_become_pending() {
   clean || return 1
   role() { # the account of an e-mail gets a membership with this role
@@ -344,6 +361,7 @@ check "I·the_idempotency_key_follows_its_account_and_has_its_index" the_idempot
 check "I·a_pending_status_is_accepted_and_the_moment_of_verification_is_kept" a_pending_status_is_accepted_and_the_moment_of_verification_is_kept
 check "I·link_rows_are_valid_unique_and_follow_their_account" link_rows_are_valid_unique_and_follow_their_account
 check "I·the_tenant_copy_keeps_an_optional_commercial_name" the_tenant_copy_keeps_an_optional_commercial_name
+check "I·the_account_keeps_who_when_and_why_of_a_change_and_of_a_temporary_credential" the_account_keeps_who_when_and_why_of_a_change_and_of_a_temporary_credential
 check "I·existing_unverified_customer_accounts_become_pending" existing_unverified_customer_accounts_become_pending
 # a pending account, a link row, a verified moment and a commercial name exist when the rollback runs, which must still
 # leave the instance empty
