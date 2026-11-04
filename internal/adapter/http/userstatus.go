@@ -49,6 +49,8 @@ func (s *server) changeStatus(change func(context.Context, changestatus.Request)
 				Details: []fieldDetail{{Field: invalid.Field, Message: "is not valid"}}})
 		case errors.Is(err, port.ErrUserNotFound):
 			writeError(w, r, http.StatusNotFound, "NOT_FOUND", "the user does not exist")
+		case errors.Is(err, port.ErrLastAdministrator):
+			writeError(w, r, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", "the last active administrator of the tenant cannot be inactivated")
 		case errors.Is(err, port.ErrStatusTransition):
 			writeError(w, r, http.StatusUnprocessableEntity, "INVALID_STATUS_TRANSITION", "the user cannot go to that status from the one it has")
 		case err != nil:
