@@ -160,3 +160,24 @@ func (s *stack) idOf(t *testing.T, email string) string {
 	}
 	return id
 }
+
+// RN-SEC-003-11: the only Administrator cannot cut their own access, and a second one can be inactivated by the first.
+func TestC_TheLastAdministratorCannotBeInactivatedByAnyoneNotEvenByThemselvesAndStillSignsIn(t *testing.T) {
+	s := newStack(t)
+	admin := s.administrator(t, tenantA, "admin@example.com")
+	adminID := s.idOf(t, "admin@example.com")
+	rec, out := s.changeStatus(t, admin, adminID, "inactivation", why)
+	if rec.Code != http.StatusUnprocessableEntity || out["error"] != "BUSINESS_RULE_VIOLATION" {
+		t.Fatalf("the only administrator inactivated themselves: %d %s", rec.Code, rec.Body)
+	}
+	if rec := s.signIn(tenantURL, "admin@example.com", password); rec.Code != http.StatusOK {
+		t.Fatalf("the administrator was locked out: %d %s", rec.Code, rec.Body)
+	}
+	second := s.account(t, tenantA, "second@example.com", pgtest.Options{}, "TENANT_ADMINISTRATOR")
+	if rec, _ := s.changeStatus(t, admin, second, "inactivation", why); rec.Code != http.StatusOK {
+		t.Fatalf("with two administrators one can be inactivated: %d %s", rec.Code, rec.Body)
+	}
+	if rec, _ := s.changeStatus(t, admin, adminID, "inactivation", why); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("the administrator is the last one again: %d %s", rec.Code, rec.Body)
+	}
+}
