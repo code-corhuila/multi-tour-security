@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -99,8 +98,7 @@ func (s *server) answerAccount(w http.ResponseWriter, r *http.Request, reg port.
 	}
 	switch {
 	case errors.As(err, &invalid):
-		writeEnvelope(w, r, http.StatusBadRequest, errorBody{Error: "VALIDATION_ERROR", Message: "the request is not valid",
-			Details: []fieldDetail{{Field: invalid.Field, Message: invalid.Reason()}}})
+		refuseField(w, r, invalid)
 	case errors.Is(err, createaccount.ErrTenantNotFound):
 		writeError(w, r, http.StatusNotFound, "NOT_FOUND", "the tenant does not exist")
 	case errors.Is(err, createaccount.ErrTenantNotActive):
@@ -114,9 +112,7 @@ func (s *server) answerAccount(w http.ResponseWriter, r *http.Request, reg port.
 		writeEnvelope(w, r, http.StatusUnprocessableEntity, errorBody{Error: "BUSINESS_RULE_VIOLATION",
 			Message: "the e-mail is already in use in this tenant", Details: []fieldDetail{{Field: "email", Message: "already in use"}}})
 	case err != nil:
-		// only the type: the text of a driver error can quote the e-mail of the row that failed
-		s.logger.ErrorContext(r.Context(), "creating an account failed", "traceId", traceID(r.Context()), "errorType", fmt.Sprintf("%T", err))
-		writeError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "an internal error occurred")
+		s.fail(w, r, "creating an account", err)
 	default:
 		status := http.StatusOK
 		if created {
