@@ -286,8 +286,9 @@ paths:
         AC4). In one transaction the account becomes INACTIVE, the sessions it had are cut, AccountSessionsRevoked is written
         with the actor and the reason, and who, when and why are kept with the account. The person can no longer sign in nor
         renew. The tenant and the actor are those of the token and nothing in the body can change them. Inactivating an
-        inactive user is 422 INVALID_STATUS_TRANSITION; a user of another tenant, a customer or an id that does not exist is
-        404. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
+        inactive user is 422 INVALID_STATUS_TRANSITION. The last active Tenant Administrator of the tenant cannot be
+        inactivated, not even by their own account: 422 BUSINESS_RULE_VIOLATION (AC6). A user of another tenant, a customer or
+        an id that does not exist is 404. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
       operationId: inactivateInternalUser
       tags: [Users]
       security:
