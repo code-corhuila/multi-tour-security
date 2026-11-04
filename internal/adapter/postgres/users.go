@@ -28,7 +28,8 @@ const userRole = `JOIN LATERAL (SELECT min(mr.role) AS role FROM security.member
 // order is the index of the listing, with the identifier as the tie-break, so a page never repeats or skips a user.
 func (d *UserDirectory) List(ctx context.Context, tenantID string, f port.UserFilter, limit, offset int) ([]port.Registered, int, error) {
 	rows, err := d.pool.Query(ctx, `SELECT identity_id::text, COALESCE(tenant_id::text, ''), email_normalized, identity_status, temporary_until,
-			COALESCE(full_name, ''), COALESCE(phone, ''), email_verified, r.role, created_at, count(*) OVER ()
+			COALESCE(full_name, ''), COALESCE(phone, ''), email_verified, r.role, created_at, count(*) OVER (),
+			status_changed_at, COALESCE(status_changed_by, ''), COALESCE(status_reason, '')
 		FROM security.identity `+userRole+` `+userFilters+`
 		ORDER BY created_at DESC, identity_id DESC LIMIT $4 OFFSET $5`, tenantID, f.Roles, f.Status, limit, offset)
 	if err != nil {
@@ -40,15 +41,15 @@ func (d *UserDirectory) List(ctx context.Context, tenantID string, f port.UserFi
 	for rows.Next() {
 		var u port.Registered
 		var status string
-		var temporary *time.Time
+		var temporary, changedAt *time.Time
 		if err := rows.Scan(&u.Account.ID, &u.Account.TenantID, &u.Account.EmailNormalized, &status, &temporary,
-			&u.FullName, &u.Phone, &u.EmailVerified, &u.Role, &u.CreatedAt, &total); err != nil {
+			&u.FullName, &u.Phone, &u.EmailVerified, &u.Role, &u.CreatedAt, &total, &changedAt, &u.Changed.By, &u.Changed.Reason); err != nil {
 			return nil, 0, err
 		}
 		if u.Account.Status, err = statusOf(status); err != nil {
 			return nil, 0, err
 		}
-		u.Account.TemporaryUntil, u.CreatedAt = utc(temporary), u.CreatedAt.UTC()
+		u.Account.TemporaryUntil, u.CreatedAt, u.Changed.At = utc(temporary), u.CreatedAt.UTC(), utc(changedAt)
 		users = append(users, u)
 	}
 	if err := rows.Err(); err != nil {
