@@ -163,6 +163,19 @@ func (r *Accounts) RecordSuccess(ctx context.Context, id string) error {
 	return err
 }
 
+// PermissionsOf gives the special permissions assigned to the account that it holds now, by name: the rows of its active membership with no
+// removal. A membership that is not active gives none, as it gives no role. The status of the account is the sign-in's to refuse.
+func (r *Accounts) PermissionsOf(ctx context.Context, id string) ([]string, error) {
+	var held []string
+	err := r.pool.QueryRow(ctx, `SELECT COALESCE(array_agg(p.permission ORDER BY p.permission), '{}') FROM security.membership m
+		JOIN security.membership_permission p USING (membership_id)
+		WHERE m.identity_id = $1::uuid AND m.membership_status = 'ACTIVE' AND p.revoked_at IS NULL`, id).Scan(&held)
+	if held == nil {
+		held = []string{}
+	}
+	return held, err
+}
+
 // RolesOf gives the roles of the active membership of the account, by name.
 func (r *Accounts) RolesOf(ctx context.Context, id string) ([]string, error) {
 	rows, err := r.pool.Query(ctx, `SELECT mr.role FROM security.membership m
