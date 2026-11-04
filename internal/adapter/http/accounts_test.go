@@ -93,10 +93,11 @@ func TestC_TheCustomerRouteHandsTheUseCaseTheTenantOfTheLinkAndTheBodyAndAnswers
 		t.Fatal(err)
 	}
 	roles, _ := got["roles"].([]any)
-	if len(got) != 9 || got["accountId"] != accountID || got["tenantId"] != accountTenant || got["email"] != "laura.perez@example.com" ||
+	permissions, hasPermissions := got["permissions"].([]any) // a customer holds none, and the field is always there (HU-SEC-006)
+	if len(got) != 10 || !hasPermissions || len(permissions) != 0 || got["accountId"] != accountID || got["tenantId"] != accountTenant || got["email"] != "laura.perez@example.com" ||
 		got["fullName"] != "Laura Pérez" || got["phone"] != "+57 300 123 4567" || got["accountStatus"] != "ACTIVE" ||
 		got["emailVerified"] != false || got["createdAt"] != "2026-10-11T15:04:05Z" || len(roles) != 1 || roles[0] != "FINAL_CUSTOMER" {
-		t.Fatalf("the answer is exactly the nine fields of the contract: %v", got)
+		t.Fatalf("the answer is exactly the ten fields of the contract: %v", got)
 	}
 	for _, secret := range []string{"Viaje-2026!", "must-never-show"} {
 		if strings.Contains(rec.Body.String(), secret) {
