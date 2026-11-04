@@ -433,6 +433,108 @@ paths:
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
+  /api/v1/security/users/{accountId}/permission-grant:
+    post:
+      summary: Assign a special permission to a user of the tenant
+      description: >
+        The Tenant Administrator assigns one of the four special permissions to a user of their own tenant (HU-SEC-006, AC2, AC3). It
+        reaches the credential from the next sign-in or refresh and cuts no session. A Tenant Administrator may receive only
+        CONSULT_SENSITIVE_DATA, also themselves, since the other three are theirs by profile (422 BUSINESS_RULE_VIOLATION); an
+        Operational Collaborator may receive any of the four; a Manager, an Accountant or an Analyst none (422
+        BUSINESS_RULE_VIOLATION). Assigning a permission the user already holds changes nothing and answers the same 200: no trace, no
+        event. A permission outside the four is 400. A user of another tenant, a customer or an id that does not exist is 404. Who
+        assigned it and when are kept and SpecialPermissionGranted is written in the same transaction. Only a token with the role
+        TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
+      operationId: grantSpecialPermission
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PermissionChangeRequest'
+      responses:
+        "200":
+          description: The user as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/users/{accountId}/permission-removal:
+    post:
+      summary: Remove a special permission from a user of the tenant
+      description: >
+        The Tenant Administrator removes a special permission from a user of their own tenant (HU-SEC-006, AC7). In one transaction the
+        permission stops being held, every session of the user is cut, and SpecialPermissionRevoked and AccountSessionsRevoked are
+        written with the actor. A permission of the Tenant Administrator's profile cannot be removed (422 BUSINESS_RULE_VIOLATION).
+        Removing a permission the user does not hold changes nothing and answers the same 200: no session is cut. A permission outside
+        the four is 400; another tenant's user, a customer or an unknown id is 404. Only a token with the role TENANT_ADMINISTRATOR, a
+        tenant and no access mark is accepted.
+      operationId: removeSpecialPermission
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PermissionChangeRequest'
+      responses:
+        "200":
+          description: The user as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
   /api/v1/security/sessions/password:
     put:
       summary: Choose the own password
@@ -1072,6 +1174,17 @@ components:
           minLength: 1
           maxLength: 72
           description: Must match password
+    SpecialPermission:
+      type: string
+      description: The four special permissions of Phase 1 (PDR section 9); no other exists and none can be created
+      enum: [VALIDATE_PAYMENT_PROOFS, MANAGE_CASH, MANAGE_DEPARTURE_EXECUTION, CONSULT_SENSITIVE_DATA]
+    PermissionChangeRequest:
+      type: object
+      required: [permission]
+      additionalProperties: false
+      properties:
+        permission:
+          $ref: '#/components/schemas/SpecialPermission'
     StatusChangeRequest:
       type: object
       required: [reason]
