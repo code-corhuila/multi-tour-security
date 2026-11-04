@@ -173,3 +173,49 @@ func (s *stack) claimsOf(t *testing.T, email string) string {
 	a, _ := s.claims(t, s.signIn(tenantURL, email, password))
 	return a.AccessToken
 }
+
+// HU-SEC-006, RN-SEC-005-08: the list shows the permissions that each user holds, through the real stack.
+func TestC_TheListShowsTheThreeOfTheAdministratorWhatWasAssignedAndNothingAfterARemoval(t *testing.T) {
+	s := newStack(t)
+	admin := s.administrator(t, tenantA, "admin@example.com")
+	colabID := s.account(t, tenantA, "colab@example.com", pgtest.Options{}, "OPERATIONAL_COLLABORATOR")
+	s.account(t, tenantA, "manager@example.com", pgtest.Options{}, "MANAGER")
+	held := func() map[string][]string {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, usersURL, nil)
+		req.Header.Set("Authorization", "Bearer "+admin)
+		rec := httptest.NewRecorder()
+		s.handler.ServeHTTP(rec, req)
+		validateAgainstContract(t, req, rec)
+		var page struct {
+			Data []struct {
+				Email       string   `json:"email"`
+				Permissions []string `json:"permissions"`
+			}
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string][]string{}
+		for _, u := range page.Data {
+			out[u.Email] = u.Permissions
+		}
+		return out
+	}
+	got := held()
+	if len(got["admin@example.com"]) != 3 || len(got["colab@example.com"]) != 0 || got["manager@example.com"] == nil || len(got["manager@example.com"]) != 0 {
+		t.Fatalf("before: %v", got)
+	}
+	if rec, _ := s.changePermission(t, admin, colabID, "grant", "CONSULT_SENSITIVE_DATA"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"permissions":["CONSULT_SENSITIVE_DATA"]`) {
+		t.Fatalf("the answer of the assignment shows the permissions: %d %s", rec.Code, rec.Body)
+	}
+	if got := held(); len(got["colab@example.com"]) != 1 || got["colab@example.com"][0] != "CONSULT_SENSITIVE_DATA" {
+		t.Fatalf("after the assignment: %v", got)
+	}
+	if rec, _ := s.changePermission(t, admin, colabID, "removal", "CONSULT_SENSITIVE_DATA"); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"permissions":[]`) {
+		t.Fatalf("the answer of the removal shows none: %d %s", rec.Code, rec.Body)
+	}
+	if got := held(); len(got["colab@example.com"]) != 0 {
+		t.Fatalf("after the removal: %v", got)
+	}
+}

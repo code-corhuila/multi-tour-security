@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -143,5 +144,58 @@ func TestC_AFailureOfTheListNeverLeaksItsCause(t *testing.T) {
 	rec := getUsers(listHandler(&fakeLister{err: errors.New("pq: password=hunter2")}, &logs), administrator(t), "")
 	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "hunter2") || strings.Contains(logs.String(), "hunter2") {
 		t.Fatalf("%d %s | %s", rec.Code, rec.Body, logs.String())
+	}
+}
+
+// HU-SEC-006, RN-SEC-005-08: every answer that carries a user shows the whole set of permissions that its credential carries.
+
+func permissionsOf(t *testing.T, body []byte) [][]string {
+	t.Helper()
+	var out struct {
+		Data []struct {
+			Permissions []string `json:"permissions"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatal(err)
+	}
+	var all [][]string
+	for _, u := range out.Data {
+		all = append(all, u.Permissions)
+	}
+	return all
+}
+
+func TestC_TheListShowsThePermissionsOfEachUserAsTheCredentialCarriesThem(t *testing.T) {
+	admin, colab, manager := registeredUser(), registeredUser(), registeredUser()
+	admin.Role = "TENANT_ADMINISTRATOR"
+	colab.Role, colab.Permissions = "OPERATIONAL_COLLABORATOR", []string{"MANAGE_CASH", "CONSULT_SENSITIVE_DATA"}
+	manager.Role, manager.Permissions = "MANAGER", []string{"MANAGE_CASH"} // a stray row that no role may hold
+	page := listusers.Page{Data: []port.Registered{admin, colab, manager}, Page: 1, Limit: 20, Total: 3, TotalPages: 1}
+	rec := getUsers(listHandler(&fakeLister{page: page}, io.Discard), administrator(t), "")
+	got := permissionsOf(t, rec.Body.Bytes())
+	want := [][]string{
+		{"MANAGE_CASH", "MANAGE_DEPARTURE_EXECUTION", "VALIDATE_PAYMENT_PROOFS"}, // the Administrator's three by profile, nothing assigned
+		{"CONSULT_SENSITIVE_DATA", "MANAGE_CASH"},                                // what was assigned, sorted
+		{}, // a manager holds none, whatever was written
+	}
+	if len(got) != 3 {
+		t.Fatalf("%s", rec.Body)
+	}
+	for i := range want {
+		if got[i] == nil || !slices.Equal(got[i], want[i]) {
+			t.Errorf("user %d shows %v, want %v", i, got[i], want[i])
+		}
+	}
+	if !strings.Contains(rec.Body.String(), `"permissions":[]`) {
+		t.Errorf("a user with none must show an empty list and not null: %s", rec.Body)
+	}
+}
+
+func TestC_TheAnswerThatRegistersAUserShowsItsPermissionsToo(t *testing.T) {
+	svc := &fakeCreator{reg: registeredUser(), created: true}
+	rec := postUser(usersHandler(svc, io.Discard), administrator(t), "application/json", userBody, usersKey)
+	if !strings.Contains(rec.Body.String(), `"permissions":[]`) {
+		t.Fatalf("a new collaborator holds none: %s", rec.Body)
 	}
 }

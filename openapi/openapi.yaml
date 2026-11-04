@@ -1140,7 +1140,7 @@ components:
     AccountResponse:
       type: object
       description: An account of a tenant. Never carries a password, a hash or any credential.
-      required: [accountId, tenantId, email, roles, accountStatus, emailVerified, createdAt]
+      required: [accountId, tenantId, email, roles, permissions, accountStatus, emailVerified, createdAt]
       properties:
         accountId: {type: string, format: uuid}
         tenantId: {type: string, format: uuid}
@@ -1159,6 +1159,12 @@ components:
         statusChangedAt: {type: string, format: date-time, description: When the status last changed; absent if it never did}
         statusChangedBy: {type: string, description: "The actor of the last change, as tenant-administrator/<accountId>"}
         statusReason: {type: string, description: Why the status last changed}
+        permissions:
+          type: array
+          description: The special permissions the user holds, as the credential carries them (HU-SEC-006)
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/SpecialPermission'
     IssueTemporaryCredentialRequest:
       type: object
       required: [password, passwordConfirmation]

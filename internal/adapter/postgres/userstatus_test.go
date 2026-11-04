@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -254,5 +255,18 @@ func TestI_AnAdministratorWhoseMembershipIsNotActiveCannotActAsOneSoTheyDoNotCou
 	user(t, pool, tenant, "b@example.com", pgtest.Options{MembershipInactive: true}, "TENANT_ADMINISTRATOR")
 	if _, err := store.ChangeStatus(ctx, command(active, account.Inactive, "x")); !errors.Is(err, port.ErrLastAdministrator) {
 		t.Fatalf("an administrator who cannot sign in as one was counted: %v", err)
+	}
+}
+
+// HU-SEC-006: the answer of a change of status shows the permissions the user holds, as the list does.
+func TestI_TheAnswerOfAChangeOfStatusShowsTheHeldPermissions(t *testing.T) {
+	store, pool := statusStore(t)
+	id := user(t, pool, tenant, "colab@example.com", pgtest.Options{}, "OPERATIONAL_COLLABORATOR")
+	if _, err := postgres.NewUserPermissions(pool).Grant(ctx, permChange(id, "MANAGE_CASH")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ChangeStatus(ctx, command(id, account.Inactive, "Left"))
+	if err != nil || !slices.Equal(got.Permissions, []string{"MANAGE_CASH"}) {
+		t.Fatalf("%+v %v: an inactive user keeps what it held", got.Permissions, err)
 	}
 }
