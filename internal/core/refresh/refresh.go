@@ -79,7 +79,11 @@ func (s *Service) Renew(ctx context.Context, value string) (signin.Tokens, error
 		return signin.Tokens{}, signin.ErrRefused
 	}
 
-	claims := token.Access(acct, roles, nil, false, now)
+	assigned, err := s.Accounts.PermissionsOf(ctx, acct.ID)
+	if err != nil {
+		return signin.Tokens{}, err
+	}
+	claims := token.Access(acct, roles, account.PermissionsFor(roles, assigned), false, now)
 	access, err := s.Signer.Sign(claims)
 	if err != nil {
 		return signin.Tokens{}, err

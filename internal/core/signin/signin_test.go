@@ -82,9 +82,9 @@ func TestC_SignInReturnsATokenOfTheTenantOfTheLinkWithTheClaimsOfTheSpec(t *test
 		!c.ExpiresAt.Equal(now.Add(15*time.Minute)) {
 		t.Fatalf("iss, aud, iat, nbf and exp of the spec: %+v", c)
 	}
-	// the special permissions have no store yet (HU-SEC-005): the claim is an empty list, never missing
-	if c.Permissions == nil || len(c.Permissions) != 0 {
-		t.Fatalf("permissions must be an empty list for now: %#v", c.Permissions)
+	// the claim is the whole set of the person (HU-SEC-006): the three of an Administrator by profile, never missing
+	if !reflect.DeepEqual(c.Permissions, []string{"MANAGE_CASH", "MANAGE_DEPARTURE_EXECUTION", "VALIDATE_PAYMENT_PROOFS"}) {
+		t.Fatalf("the Administrator carries the three of the profile: %#v", c.Permissions)
 	}
 	if len(w.sessions.opened) != 1 || w.sessions.opened[0] != session.Hash(got.RefreshToken) || w.sessions.owners[0] != "acc-1" ||
 		!w.sessions.at[0].Equal(now) {

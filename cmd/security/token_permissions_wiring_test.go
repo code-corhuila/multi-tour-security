@@ -70,6 +70,7 @@ func TestC_ACollaboratorTokenCarriesWhatWasAssignedAndAfterARemovalTheNextSignIn
 	if rec, _ := s.changePermission(t, admin, colabID, "removal", "MANAGE_CASH"); rec.Code != http.StatusOK {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
+	// the removal cut every session of the user, the one of this renewed token included
 	if rec := s.refresh(renewed.RefreshToken); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("after the removal the refresh is refused: %d %s", rec.Code, rec.Body)
 	}
