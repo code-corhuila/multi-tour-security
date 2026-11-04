@@ -50,7 +50,7 @@ func (s *server) changeStatus(change func(context.Context, changestatus.Request)
 		case errors.Is(err, port.ErrLastAdministrator):
 			refuseRule(w, r, "the last active administrator of the tenant cannot be inactivated")
 		case errors.Is(err, port.ErrStatusTransition):
-			writeError(w, r, http.StatusUnprocessableEntity, "INVALID_STATUS_TRANSITION", "the user cannot go to that status from the one it has")
+			refuseTransition(w, r, "the user cannot go to that status from the one it has")
 		case err != nil:
 			s.fail(w, r, "changing the status of a user", err)
 		default:
