@@ -115,7 +115,7 @@ refused() { # fragment, statement
 # every table with a foreign key to these must be in the list, or the TRUNCATE fails and the probes say so
 clean() {
   # the key table (HU-SEC-002) and the link table (HU-SEC-003) reference identity, so they join the TRUNCATE once they exist
-  extra=$(psql_admin -c "SELECT CASE WHEN to_regclass('security.idempotency_key') IS NULL THEN '' ELSE ', security.idempotency_key' END || CASE WHEN to_regclass('security.email_verification') IS NULL THEN '' ELSE ', security.email_verification' END") || return 1
+  extra=$(psql_admin -c "SELECT CASE WHEN to_regclass('security.idempotency_key') IS NULL THEN '' ELSE ', security.idempotency_key' END || CASE WHEN to_regclass('security.email_verification') IS NULL THEN '' ELSE ', security.email_verification' END || CASE WHEN to_regclass('security.membership_permission') IS NULL THEN '' ELSE ', security.membership_permission' END || CASE WHEN to_regclass('security.tenant_optional_role') IS NULL THEN '' ELSE ', security.tenant_optional_role' END") || return 1
   psql_admin -c "TRUNCATE security.refresh_token, security.session, security.membership_role, security.membership, security.identity, security.tenant_copy$extra" >/dev/null || { echo "could not clean the tables"; return 1; }
 }
 identity() { # tenant (quoted uuid or NULL), e-mail, status
@@ -335,6 +335,73 @@ existing_unverified_customer_accounts_become_pending() {
   [ "$(status customer@example.com)" = ACTIVE ] || { echo "the rollback did not restore the account"; return 1; }
 }
 
+# ---- the probes of the permissions and the optional roles (spec 005-hu-sec-006, task PERM-02)
+membership() { # e-mail, role: the account of that e-mail gets a membership with this role, and its id is printed
+  psql_admin -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity WHERE email_normalized = '$1' ON CONFLICT DO NOTHING" \
+             -c "INSERT INTO security.membership_role (membership_id, role) SELECT m.membership_id, '$2' FROM security.membership m JOIN security.identity i USING (identity_id) WHERE i.email_normalized = '$1'" >/dev/null &&
+    psql_admin -c "SELECT m.membership_id FROM security.membership m JOIN security.identity i USING (identity_id) WHERE i.email_normalized = '$1'"
+}
+the_permissions_of_a_user_are_the_four_and_keep_who_and_when() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" colab@example.com)" >/dev/null || return 1
+  m=$(membership colab@example.com OPERATIONAL_COLLABORATOR) || return 1
+  grant() { printf "INSERT INTO security.membership_permission (membership_id, permission, granted_at, granted_by) VALUES ('%s', '%s', now(), '%s')" "$m" "$1" "${2-tenant-administrator/x}"; }
+  for p in VALIDATE_PAYMENT_PROOFS MANAGE_CASH MANAGE_DEPARTURE_EXECUTION CONSULT_SENSITIVE_DATA; do
+    psql_admin -c "$(grant $p)" >/dev/null || { echo "$p was refused"; return 1; }
+  done
+  refused pk_membership_permission "$(grant MANAGE_CASH)" || return 1
+  psql_admin -c "DELETE FROM security.membership_permission" >/dev/null || return 1
+  refused chk_membership_permission_permission "$(grant SUPERUSER)" || return 1
+  refused chk_membership_permission_permission "$(grant manage_cash)" || return 1
+  refused chk_membership_permission_granted_by "$(grant MANAGE_CASH '')" || return 1
+  refused chk_membership_permission_granted_by "$(grant MANAGE_CASH "$(printf 'a%.0s' $(seq 1 101))")" || return 1
+  psql_admin -c "$(grant MANAGE_CASH)" >/dev/null || return 1
+  # who and when of a removal are written together, or not at all
+  refused chk_membership_permission_revoked_trace "UPDATE security.membership_permission SET revoked_at = now()" || return 1
+  refused chk_membership_permission_revoked_trace "UPDATE security.membership_permission SET revoked_by = 'tenant-administrator/x'" || return 1
+  refused chk_membership_permission_revoked_by "UPDATE security.membership_permission SET revoked_at = now(), revoked_by = ''" || return 1
+  psql_admin -c "UPDATE security.membership_permission SET revoked_at = now(), revoked_by = 'tenant-administrator/x'" >/dev/null || { echo "a removal with its trace was refused"; return 1; }
+  ghost=00000000-0000-4000-8000-0000000000ff
+  refused fk_membership_permission_membership "INSERT INTO security.membership_permission (membership_id, permission, granted_at, granted_by) VALUES ('$ghost', 'MANAGE_CASH', now(), 'x')" || return 1
+  psql_admin -c "DELETE FROM security.membership WHERE membership_id = '$m'" >/dev/null || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM security.membership_permission")" = 0 ] || { echo "a permission did not follow its membership"; return 1; }
+}
+a_tenant_enables_only_the_three_optional_roles_once_each() {
+  clean || return 1
+  r() { printf "INSERT INTO security.tenant_optional_role (tenant_id, role, enabled, changed_at, changed_by) VALUES ('%s', '%s', true, now(), '%s')" "$1" "$2" "${3-tenant-administrator/x}"; }
+  for role in MANAGER ACCOUNTANT ANALYST; do
+    psql_admin -c "$(r $T1 $role)" >/dev/null || { echo "$role was refused"; return 1; }
+  done
+  psql_admin -c "$(r $T2 MANAGER)" >/dev/null || { echo "another tenant cannot enable the same role"; return 1; }
+  refused pk_tenant_optional_role "$(r $T1 MANAGER)" || return 1
+  for role in TENANT_ADMINISTRATOR OPERATIONAL_COLLABORATOR FINAL_CUSTOMER manager; do
+    refused chk_tenant_optional_role_role "$(r $T2 $role)" || return 1
+  done
+  refused chk_tenant_optional_role_changed_by "$(r $T2 ANALYST '')"
+}
+the_app_user_writes_the_permissions_and_the_optional_roles() {
+  for t in membership_permission tenant_optional_role; do
+    [ "$(psql_admin -c "SELECT has_table_privilege('security_app', 'security.$t', 'INSERT,UPDATE,DELETE')")" = t ] || { echo "security_app cannot write security.$t"; return 1; }
+  done
+}
+a_tenant_with_existing_managers_starts_with_manager_enabled() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" m1@example.com)" -c "$(identity "'$T1'" m2@example.com)" -c "$(identity "'$T1'" gone@example.com INACTIVE)" \
+             -c "$(identity "'$T1'" admin@example.com)" -c "$(identity "'$T2'" colab@example.com)" >/dev/null || return 1
+  { membership m1@example.com MANAGER && membership m2@example.com MANAGER && membership gone@example.com ANALYST \
+    && membership admin@example.com TENANT_ADMINISTRATOR && membership colab@example.com OPERATIONAL_COLLABORATOR; } >/dev/null || return 1
+  rows() { psql_admin -c "SELECT coalesce(string_agg(tenant_id::text || ':' || role || ':' || enabled || ':' || changed_by, ',' ORDER BY tenant_id, role), '') FROM security.tenant_optional_role"; }
+  psql_file db/02_dml/002_enable_optional_roles_in_use.sql >/dev/null || { echo "the data migration did not run"; return 1; }
+  # the managers and the inactive analyst of the first tenant enable their roles; the second tenant has none
+  [ "$(rows)" = "$T1:ANALYST:true:migration/security-dml-002,$T1:MANAGER:true:migration/security-dml-002" ] || { echo "the migration enabled: $(rows)"; return 1; }
+  psql_file db/02_dml/002_enable_optional_roles_in_use.sql >/dev/null || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM security.tenant_optional_role")" = 2 ] || { echo "a second run changed the rows"; return 1; }
+  # the rollback removes only what the migration wrote, never a change an Administrator made afterwards
+  psql_admin -c "UPDATE security.tenant_optional_role SET changed_by = 'tenant-administrator/x' WHERE role = 'ANALYST'" >/dev/null || return 1
+  psql_file db/05_rollbacks/02_dml/002_enable_optional_roles_in_use.rollback.sql >/dev/null || { echo "its rollback did not run"; return 1; }
+  [ "$(rows)" = "$T1:ANALYST:true:tenant-administrator/x" ] || { echo "the rollback left: $(rows)"; return 1; }
+}
+
 # ---- an empty instance, as multi-tour-infra-postgres leaves it for this domain (J.7)
 docker build -q -f deploy/liquibase.Dockerfile -t "$LIQUIBASE_IMAGE" deploy >/dev/null || { echo "the runner image did not build"; exit 1; }
 docker network create "$RUN_ID" >/dev/null || exit 1
@@ -373,13 +440,20 @@ check "I·the_tenant_copy_keeps_an_optional_commercial_name" the_tenant_copy_kee
 check "I·the_account_keeps_who_when_and_why_of_a_change_and_of_a_temporary_credential" the_account_keeps_who_when_and_why_of_a_change_and_of_a_temporary_credential
 check "I·the_listing_of_users_has_its_index" the_listing_of_users_has_its_index
 check "I·existing_unverified_customer_accounts_become_pending" existing_unverified_customer_accounts_become_pending
+check "I·the_permissions_of_a_user_are_the_four_and_keep_who_and_when" the_permissions_of_a_user_are_the_four_and_keep_who_and_when
+check "I·a_tenant_enables_only_the_three_optional_roles_once_each" a_tenant_enables_only_the_three_optional_roles_once_each
+check "I·the_app_user_writes_the_permissions_and_the_optional_roles" the_app_user_writes_the_permissions_and_the_optional_roles
+check "I·a_tenant_with_existing_managers_starts_with_manager_enabled" a_tenant_with_existing_managers_starts_with_manager_enabled
 # a pending account, a link row, a verified moment and a commercial name exist when the rollback runs, which must still
 # leave the instance empty
 clean
 psql_admin -c "$(identity "'$T1'" ana@example.com PENDING)" \
            -c "INSERT INTO security.email_verification (identity_id, token_hash, expires_at) SELECT identity_id, '$LINK_HASH', now() + interval '1 day' FROM security.identity" \
            -c "UPDATE security.identity SET email_verified_at = now()" \
-           -c "INSERT INTO security.tenant_copy (tenant_id, identifier, status, occurred_at, commercial_name) VALUES ('$T1', 'acme-tours', 'ACTIVE', now(), 'Acme Tours SAS')" >/dev/null
+           -c "INSERT INTO security.tenant_copy (tenant_id, identifier, status, occurred_at, commercial_name) VALUES ('$T1', 'acme-tours', 'ACTIVE', now(), 'Acme Tours SAS')" \
+           -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity" \
+           -c "INSERT INTO security.membership_permission (membership_id, permission, granted_at, granted_by) SELECT membership_id, 'MANAGE_CASH', now(), 'tenant-administrator/x' FROM security.membership" \
+           -c "INSERT INTO security.tenant_optional_role (tenant_id, role, enabled, changed_at, changed_by) VALUES ('$T1', 'MANAGER', true, now(), 'tenant-administrator/x')" >/dev/null
 check "I·db_ci_rolls_back_to_empty" rolled_back_to_empty
 check "I·db_ci_rebuilds_after_the_rollback" lb update
 check "I·security_app_writes_only_its_schema_after_the_rebuild" writes_only_its_schema
