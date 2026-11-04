@@ -152,7 +152,8 @@ func TestA_AServiceWithAPieceMissingOrACorrelationIdTheOutboxRefusesIsOurMistake
 		if _, err := s.Enable(context.Background(), request("MANAGER")); err == nil || errors.Is(err, optionalrole.ErrInvalid) {
 			t.Errorf("%s: %v", name, err)
 		}
-		if _, err := s.List(context.Background(), optionalrole.Query{TenantID: tenantID}); err == nil || errors.Is(err, optionalrole.ErrInvalid) {
+		// the list reads and never uses the clock: only a missing store is a wiring error for it
+		if _, err := s.List(context.Background(), optionalrole.Query{TenantID: tenantID}); (name == "no store") != (err != nil) || errors.Is(err, optionalrole.ErrInvalid) {
 			t.Errorf("%s, listing: %v", name, err)
 		}
 	}
