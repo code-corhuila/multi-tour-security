@@ -5,29 +5,22 @@ import (
 	"context"
 	"errors"
 	"math"
-	"regexp"
 	"slices"
 
+	"github.com/code-corhuila/multi-tour-security/internal/core/account"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
+	"github.com/code-corhuila/multi-tour-security/internal/core/validate"
 )
 
-// ErrInvalid is any part of the request that is not valid; FieldError says which.
-var ErrInvalid = errors.New("the request is not valid")
+// ErrInvalid and FieldError are those every use case shares.
+var ErrInvalid = validate.ErrInvalid
 
-// FieldError names the field that was refused, never its value.
-type FieldError struct{ Field string }
-
-func (e *FieldError) Error() string        { return e.Field + ": is not valid" }
-func (e *FieldError) Is(target error) bool { return target == ErrInvalid }
+type FieldError = validate.FieldError
 
 const maxLimit = 100
 
-// internalRoles are the only roles the list ever shows: a customer or a platform role is never listed, whatever is asked.
-var internalRoles = []string{"TENANT_ADMINISTRATOR", "OPERATIONAL_COLLABORATOR", "MANAGER", "ACCOUNTANT", "ANALYST"}
-
 var (
 	statuses = []string{"ACTIVE", "INACTIVE", "PENDING"}
-	uuid     = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 )
 
 // Query is one request. Role and Status are empty for any. The tenant is the one of the credential.
@@ -58,11 +51,11 @@ func (s *Service) List(ctx context.Context, q Query) (Page, error) {
 	if s.Directory == nil {
 		return Page{}, errors.New("the user list is not wired: the store is needed")
 	}
-	roles := slices.Clone(internalRoles)
+	roles := account.InternalRoles()
 	switch {
-	case !uuid.MatchString(q.TenantID):
+	case !validate.UUID(q.TenantID):
 		return Page{}, &FieldError{Field: "tenantId"}
-	case q.Role != "" && !slices.Contains(internalRoles, q.Role):
+	case q.Role != "" && !account.IsInternalRole(q.Role):
 		return Page{}, &FieldError{Field: "role"}
 	case q.Status != "" && !slices.Contains(statuses, q.Status):
 		return Page{}, &FieldError{Field: "status"}
