@@ -1,5 +1,7 @@
 package createaccount
 
+import "github.com/code-corhuila/multi-tour-security/internal/core/account"
+
 // rule is one row of the table of plan D-02: what differs between the kinds of account. Everything else is shared.
 type rule struct {
 	scope string // prefix of the idempotency scope, so that one key means one intent per kind and tenant
@@ -29,16 +31,7 @@ func rules(k Kind) (rule, bool) {
 	case InternalUser:
 		return rule{scope: "user", confirmed: true, temporary: true, activeTenant: true, createdBy: "tenant-administrator", hasActor: true}, true
 	case FirstAdministrator:
-		return rule{scope: "first-admin", role: "TENANT_ADMINISTRATOR", temporary: true, createdBy: "service", hasActor: true}, true
+		return rule{scope: "first-admin", role: account.RoleTenantAdministrator, temporary: true, createdBy: "service", hasActor: true}, true
 	}
 	return rule{}, false
-}
-
-// tenantRole tells whether a role is one that a person of a tenant can give another; a platform or customer role never is.
-func tenantRole(role string) bool {
-	switch role {
-	case "TENANT_ADMINISTRATOR", "OPERATIONAL_COLLABORATOR", "MANAGER", "ACCOUNTANT", "ANALYST":
-		return true
-	}
-	return false
 }

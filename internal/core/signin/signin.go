@@ -14,6 +14,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/session"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenant"
 	"github.com/code-corhuila/multi-tour-security/internal/core/token"
+	shared "github.com/code-corhuila/multi-tour-security/internal/core/validate"
 )
 
 var (
@@ -28,10 +29,7 @@ var (
 )
 
 const (
-	tenantAdministrator   = "TENANT_ADMINISTRATOR"
-	platformAdministrator = "PLATFORM_ADMINISTRATOR"
-	maxPassword           = 128
-	maxCorrelationID      = 128
+	maxPassword = 128
 )
 
 // Request is a sign-in. TenantIdentifier is the one of the link and is ignored at the platform.
@@ -132,7 +130,7 @@ func (s *Service) signIn(ctx context.Context, r Request, platform bool) (Tokens,
 	}
 	// an account with no role would open nothing; the platform lets in only its Administrator and an inactive tenant
 	// only its own
-	if len(roles) == 0 || (platform && !slices.Contains(roles, platformAdministrator)) || (inactive && !slices.Contains(roles, tenantAdministrator)) {
+	if len(roles) == 0 || (platform && !slices.Contains(roles, account.RolePlatformAdministrator)) || (inactive && !slices.Contains(roles, account.RoleTenantAdministrator)) {
 		return Tokens{}, ErrRefused
 	}
 	if err := s.Accounts.RecordSuccess(ctx, acct.ID); err != nil {
@@ -174,7 +172,7 @@ func validate(r Request) (string, bool) {
 	}
 	// the correlation id is written with a failure and with the event of a block: one that cannot be stored must be
 	// refused for everyone, or the answer would tell which accounts exist
-	if len(r.CorrelationID) < 1 || len(r.CorrelationID) > maxCorrelationID {
+	if !shared.CorrelationID(r.CorrelationID) {
 		return "", false
 	}
 	// bcrypt reads 72 bytes at most: the password policy of HU-SEC-002 caps new passwords there, and a longer one
