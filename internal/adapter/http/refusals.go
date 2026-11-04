@@ -30,6 +30,11 @@ func refuseRule(w http.ResponseWriter, r *http.Request, message string) {
 	writeError(w, r, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", message)
 }
 
+// refuseTransition answers the 422 of a change that the state of the thing does not allow, which the clients tell from a business rule.
+func refuseTransition(w http.ResponseWriter, r *http.Request, message string) {
+	writeError(w, r, http.StatusUnprocessableEntity, "INVALID_STATUS_TRANSITION", message)
+}
+
 // fail answers the 500 of a failure of ours. The log gets the trace id and, of the cause, only its type: the text of a driver
 // error can quote the row that failed, and nothing of it reaches the caller.
 func (s *server) fail(w http.ResponseWriter, r *http.Request, what string, err error) {
