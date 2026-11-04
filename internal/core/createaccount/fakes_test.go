@@ -56,6 +56,7 @@ func (f *fakeAccounts) FindByEmail(_ context.Context, tenantID, email string) (a
 	return a, ok, f.err
 }
 
+func (f *fakeAccounts) PermissionsOf(context.Context, string) ([]string, error) { return nil, nil }
 func (f *fakeAccounts) RolesOf(_ context.Context, id string) ([]string, error) {
 	return f.roles[id], f.err
 }
