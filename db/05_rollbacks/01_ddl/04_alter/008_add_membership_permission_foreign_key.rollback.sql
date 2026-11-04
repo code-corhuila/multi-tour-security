@@ -1,0 +1,1 @@
+ALTER TABLE security.membership_permission DROP CONSTRAINT IF EXISTS fk_membership_permission_membership;
