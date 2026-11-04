@@ -3,7 +3,6 @@ package httpadapter
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/changestatus"
@@ -44,19 +43,16 @@ func (s *server) changeStatus(change func(context.Context, changestatus.Request)
 			out, err = toAccountBody(reg)
 		}
 		switch {
-		case errors.As(err, &invalid) && (invalid.Field == "reason" || invalid.Field == "accountId"):
-			writeEnvelope(w, r, http.StatusBadRequest, errorBody{Error: "VALIDATION_ERROR", Message: "the request is not valid",
-				Details: []fieldDetail{{Field: invalid.Field, Message: "is not valid"}}})
+		case errors.As(err, &invalid) && callerField(invalid):
+			refuseField(w, r, invalid)
 		case errors.Is(err, port.ErrUserNotFound):
-			writeError(w, r, http.StatusNotFound, "NOT_FOUND", "the user does not exist")
+			refuseNoUser(w, r)
 		case errors.Is(err, port.ErrLastAdministrator):
-			writeError(w, r, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", "the last active administrator of the tenant cannot be inactivated")
+			refuseRule(w, r, "the last active administrator of the tenant cannot be inactivated")
 		case errors.Is(err, port.ErrStatusTransition):
 			writeError(w, r, http.StatusUnprocessableEntity, "INVALID_STATUS_TRANSITION", "the user cannot go to that status from the one it has")
 		case err != nil:
-			// the tenant and the actor come from the credential: an id that is not one is our failure, not a 400. Only the type is logged
-			s.logger.ErrorContext(r.Context(), "changing the status of a user failed", "traceId", traceID(r.Context()), "errorType", fmt.Sprintf("%T", err))
-			writeError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "an internal error occurred")
+			s.fail(w, r, "changing the status of a user", err)
 		default:
 			writeJSON(w, http.StatusOK, out)
 		}

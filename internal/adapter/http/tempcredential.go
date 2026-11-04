@@ -3,7 +3,6 @@ package httpadapter
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 
@@ -71,19 +70,16 @@ func (s *server) issueTemporaryCredential(w http.ResponseWriter, r *http.Request
 		out, err = toAccountBody(reg)
 	}
 	switch {
-	case errors.As(err, &invalid) && invalid.Field != "actorId":
-		writeEnvelope(w, r, http.StatusBadRequest, errorBody{Error: "VALIDATION_ERROR", Message: "the request is not valid",
-			Details: []fieldDetail{{Field: invalid.Field, Message: invalid.Reason()}}})
+	case errors.As(err, &invalid) && callerField(invalid):
+		refuseField(w, r, invalid)
 	case errors.Is(err, port.ErrUserNotFound):
-		writeError(w, r, http.StatusNotFound, "NOT_FOUND", "the user does not exist")
+		refuseNoUser(w, r)
 	case errors.Is(err, issuetemp.ErrNotAuthorized):
-		writeError(w, r, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", "the issuer cannot issue a credential to that user")
+		refuseRule(w, r, "the issuer cannot issue a credential to that user")
 	case errors.Is(err, port.ErrNotTemporary):
-		writeError(w, r, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", "the user has no temporary credential to replace: they chose their own password")
+		refuseRule(w, r, "the user has no temporary credential to replace: they chose their own password")
 	case err != nil:
-		// the actor comes from the credential: an id that is not one is our failure. Only the type is logged: a driver error can quote a row
-		s.logger.ErrorContext(r.Context(), "issuing a temporary credential failed", "traceId", traceID(r.Context()), "errorType", fmt.Sprintf("%T", err))
-		writeError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "an internal error occurred")
+		s.fail(w, r, "issuing a temporary credential", err)
 	default:
 		writeJSON(w, http.StatusOK, out)
 	}
