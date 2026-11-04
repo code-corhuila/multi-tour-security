@@ -100,7 +100,7 @@ func (s *server) answerAccount(w http.ResponseWriter, r *http.Request, reg port.
 	switch {
 	case errors.As(err, &invalid):
 		writeEnvelope(w, r, http.StatusBadRequest, errorBody{Error: "VALIDATION_ERROR", Message: "the request is not valid",
-			Details: []fieldDetail{{Field: invalid.Field, Message: invalid.Err.Error()}}})
+			Details: []fieldDetail{{Field: invalid.Field, Message: invalid.Reason()}}})
 	case errors.Is(err, createaccount.ErrTenantNotFound):
 		writeError(w, r, http.StatusNotFound, "NOT_FOUND", "the tenant does not exist")
 	case errors.Is(err, createaccount.ErrTenantNotActive):

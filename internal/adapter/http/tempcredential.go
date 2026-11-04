@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/code-corhuila/multi-tour-security/internal/core/account"
 	"github.com/code-corhuila/multi-tour-security/internal/core/issuetemp"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 )
@@ -21,18 +22,16 @@ func WithIssueTemporaryCredential(service CredentialIssuer) Option {
 	return func(s *server) { s.credentialIssuer = service }
 }
 
-const platformAdministratorRole = "PLATFORM_ADMINISTRATOR"
-
 // issuerRole tells which administrator the credential is: a Tenant Administrator of a tenant, or the Platform Administrator, who has
 // none. A temporary or restricted credential is neither, and the use case decides who may issue to whom.
 func issuerRole(claims Claims) (string, bool) {
 	switch {
 	case claims.Access != "":
 		return "", false
-	case slices.Contains(claims.Roles, tenantAdministratorRole) && claims.TenantID != "":
-		return tenantAdministratorRole, true
-	case slices.Contains(claims.Roles, platformAdministratorRole) && claims.TenantID == "":
-		return platformAdministratorRole, true
+	case slices.Contains(claims.Roles, account.RoleTenantAdministrator) && claims.TenantID != "":
+		return account.RoleTenantAdministrator, true
+	case slices.Contains(claims.Roles, account.RolePlatformAdministrator) && claims.TenantID == "":
+		return account.RolePlatformAdministrator, true
 	}
 	return "", false
 }
@@ -74,7 +73,7 @@ func (s *server) issueTemporaryCredential(w http.ResponseWriter, r *http.Request
 	switch {
 	case errors.As(err, &invalid) && invalid.Field != "actorId":
 		writeEnvelope(w, r, http.StatusBadRequest, errorBody{Error: "VALIDATION_ERROR", Message: "the request is not valid",
-			Details: []fieldDetail{{Field: invalid.Field, Message: invalid.Err.Error()}}})
+			Details: []fieldDetail{{Field: invalid.Field, Message: invalid.Reason()}}})
 	case errors.Is(err, port.ErrUserNotFound):
 		writeError(w, r, http.StatusNotFound, "NOT_FOUND", "the user does not exist")
 	case errors.Is(err, issuetemp.ErrNotAuthorized):
