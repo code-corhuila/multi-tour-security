@@ -16,6 +16,7 @@ import (
 	"github.com/getkin/kin-openapi/routers/legacy"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/changepassword"
+	"github.com/code-corhuila/multi-tour-security/internal/core/changestatus"
 	"github.com/code-corhuila/multi-tour-security/internal/core/createaccount"
 	"github.com/code-corhuila/multi-tour-security/internal/core/listusers"
 	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
@@ -327,6 +328,28 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		{"", admin, &fakeLister{err: errors.New("boom")}, http.StatusInternalServerError},
 	} {
 		run(listHandler(c.svc, io.Discard), http.MethodGet, usersRoute+c.query, "", "", c.token, c.want)
+	}
+
+	// inactivating and reactivating: only an Administrator's ordinary token, and every answer of the use case
+	for _, path := range []string{inactivate, reactivate} {
+		for _, c := range []struct {
+			contentType, body, token string
+			svc                      *fakeStatus
+			want                     int
+		}{
+			{"application/json", reasonBody, admin, &fakeStatus{reg: registeredUser()}, http.StatusOK},
+			{"application/json", `{"reason":`, admin, &fakeStatus{}, http.StatusBadRequest},
+			{"application/json", reasonBody, admin, &fakeStatus{err: &changestatus.FieldError{Field: "reason"}}, http.StatusBadRequest},
+			{"application/json", reasonBody, "", &fakeStatus{}, http.StatusUnauthorized},
+			{"application/json", reasonBody, tokenWith(t, []string{"MANAGER"}, accountTenant, ""), &fakeStatus{}, http.StatusForbidden},
+			{"application/json", reasonBody, admin, &fakeStatus{err: port.ErrUserNotFound}, http.StatusNotFound},
+			{"text/plain", reasonBody, admin, &fakeStatus{}, http.StatusUnsupportedMediaType},
+			{"application/json", `{"reason":"` + strings.Repeat("a", 5000) + `"}`, admin, &fakeStatus{}, http.StatusRequestEntityTooLarge},
+			{"application/json", reasonBody, admin, &fakeStatus{err: port.ErrStatusTransition}, http.StatusUnprocessableEntity},
+			{"application/json", reasonBody, admin, &fakeStatus{err: errors.New("boom")}, http.StatusInternalServerError},
+		} {
+			run(statusHandler(c.svc, io.Discard), http.MethodPost, path, c.contentType, c.body, c.token, c.want)
+		}
 	}
 
 	for path, item := range doc.Paths.Map() {
