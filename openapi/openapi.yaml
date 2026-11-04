@@ -244,7 +244,7 @@ paths:
         and its confirmation, which must match, follow the policy; the password is a temporary credential of 72 hours that
         only allows choosing another, it is stored only as a hash and is never returned. The tenant must be ACTIVE. An
         e-mail that already has an account in the tenant is 422 with the reason in details: an internal user, an inactive
-        internal user who can be reactivated, or a Final Customer account. A repeat with the same Idempotency-Key answers
+        internal user who can be reactivated, or a Final Customer account. An optional role (MANAGER, ACCOUNTANT, ANALYST) that the tenant has not enabled is 422 too (HU-SEC-006). A repeat with the same Idempotency-Key answers
         200 with the user already created. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is
         accepted: a collaborator, a customer, the Platform Administrator and a temporary or restricted token get 403.
       operationId: createInternalUser
