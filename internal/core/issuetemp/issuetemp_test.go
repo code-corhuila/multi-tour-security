@@ -234,3 +234,34 @@ func TestA_TheFailuresOfTheStoreReachTheCallerAsTheyAre(t *testing.T) {
 		t.Fatalf("an account that chose its password between the read and the write: %v", err)
 	}
 }
+
+// an issuer without authority is told nothing else: not the password policy, not that the user chose a password
+func TestA_AnIssuerWithoutAuthorityGetsTheRefusalOfAuthorityBeforeAnyOtherRefusal(t *testing.T) {
+	weak := request(tenantAdm, tenantA)
+	weak.Password, weak.Confirmation = "weak", "weak"
+	ownPassword := administrator(true, 1)
+	ownPassword.target.HasTemporary = false
+	for name, c := range map[string]struct {
+		store *fakeStore
+		r     issuetemp.Request
+	}{
+		"a weak password":                 {administrator(true, 1), weak},
+		"a user who chose their password": {ownPassword, request(tenantAdm, tenantA)},
+	} {
+		if _, err := issue(c.store, c.r); !errors.Is(err, issuetemp.ErrNotAuthorized) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// an authorized issuer is told the policy before anything is hashed, and before the account is looked at for its own password
+func TestA_AnAuthorizedIssuerWithAWeakPasswordIsToldThePolicyAndNotThatTheUserChoseTheirs(t *testing.T) {
+	store := collaborator()
+	store.target.HasTemporary = false
+	r := request(tenantAdm, tenantA)
+	r.Password, r.Confirmation = "weak", "weak"
+	var invalid *issuetemp.FieldError
+	if _, err := issue(store, r); !errors.As(err, &invalid) || invalid.Field != "password" {
+		t.Fatalf("%v", err)
+	}
+}
