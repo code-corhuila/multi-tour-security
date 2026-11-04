@@ -229,6 +229,9 @@ func TestI_NoSecretIsStoredInClear(t *testing.T) {
 
 func TestI_ATemporaryCredentialStoresItsExpiry(t *testing.T) {
 	registry, pool := registrySetup(t)
+	if _, err := postgres.NewOptionalRoles(pool).Enable(ctx, roleChange(tenant, "MANAGER")); err != nil {
+		t.Fatal(err)
+	}
 	n := newAccount("user@example.com")
 	n.Role, n.CreatedBy = "MANAGER", "tenant-administrator/abc"
 	n.TemporaryUntil = time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)

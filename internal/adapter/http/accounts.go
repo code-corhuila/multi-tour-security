@@ -109,6 +109,8 @@ func (s *server) answerAccount(w http.ResponseWriter, r *http.Request, reg port.
 		// only the registration of a user is told whose the e-mail is (the use case decides who is told)
 		writeEnvelope(w, r, http.StatusUnprocessableEntity, errorBody{Error: "BUSINESS_RULE_VIOLATION",
 			Message: "the e-mail is already in use in this tenant", Details: []fieldDetail{{Field: "email", Message: takenMessage(taken.Reason)}}})
+	case errors.Is(err, port.ErrRoleNotEnabled):
+		refuseRule(w, r, "the role is not enabled in this tenant")
 	case errors.Is(err, port.ErrEmailTaken):
 		// the details tell the portal a taken e-mail from an inactive tenant, whose 422 carries none
 		writeEnvelope(w, r, http.StatusUnprocessableEntity, errorBody{Error: "BUSINESS_RULE_VIOLATION",

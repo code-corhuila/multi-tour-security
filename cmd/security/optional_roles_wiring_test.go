@@ -146,3 +146,13 @@ func TestC_OnlyAnAdministratorSeesOrChangesTheOptionalRoles(t *testing.T) {
 		}
 	}
 }
+
+// enableRoles turns on the optional roles that a test registers users with: since HU-SEC-006 a tenant has none until it enables them.
+func (s *stack) enableRoles(t *testing.T, token string, roles ...string) {
+	t.Helper()
+	for _, role := range roles {
+		if rec, _ := s.optionalRoles(t, token, http.MethodPost, "/"+role+"/enablement"); rec.Code != http.StatusOK {
+			t.Fatalf("enabling %s: %d %s", role, rec.Code, rec.Body)
+		}
+	}
+}
