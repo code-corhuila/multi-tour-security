@@ -124,6 +124,7 @@ func TestC_ARefusalOfTheUseCaseIsItsOwnStatusAndNeverALeak(t *testing.T) {
 		"an actor that is not an id":   {&changestatus.FieldError{Field: "actorId"}, http.StatusInternalServerError, "INTERNAL_ERROR"},
 		"a user that is not there":     {port.ErrUserNotFound, http.StatusNotFound, "NOT_FOUND"},
 		"a status that cannot be made": {port.ErrStatusTransition, http.StatusUnprocessableEntity, "INVALID_STATUS_TRANSITION"},
+		"the last administrator":       {port.ErrLastAdministrator, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION"},
 		"a failure of ours":            {errors.New("pq: password=hunter2"), http.StatusInternalServerError, "INTERNAL_ERROR"},
 	} {
 		var logs strings.Builder

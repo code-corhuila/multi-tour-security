@@ -164,3 +164,95 @@ func TestI_TheListShowsTheLastChangeOfEachUser(t *testing.T) {
 		}
 	}
 }
+
+// HU-SEC-005, RN-SEC-003-11: the last active Tenant Administrator of a tenant cannot be inactivated.
+
+func TestI_TheLastActiveAdministratorCannotBeInactivatedNotEvenByTheirOwnAccountAndNothingIsWritten(t *testing.T) {
+	store, pool := statusStore(t)
+	admin := user(t, pool, tenant, "admin@example.com", pgtest.Options{}, "TENANT_ADMINISTRATOR")
+	user(t, pool, tenant, "manager@example.com", pgtest.Options{}, "MANAGER")
+	user(t, pool, otherTenant, "other-admin@example.com", pgtest.Options{}, "TENANT_ADMINISTRATOR")
+	if _, err := store.ChangeStatus(ctx, command(admin, account.Inactive, "x")); !errors.Is(err, port.ErrLastAdministrator) {
+		t.Fatalf("the only administrator of the tenant was inactivated: %v (an administrator of another tenant does not count)", err)
+	}
+	var status string
+	var cutoff *time.Time
+	if err := pool.QueryRow(ctx, `SELECT identity_status, sessions_revoked_from FROM security.identity WHERE identity_id = $1::uuid`, admin).Scan(&status, &cutoff); err != nil ||
+		status != "ACTIVE" || cutoff != nil || revocations(t, pool, admin) != 0 {
+		t.Fatalf("a refusal wrote something: %s %v", status, cutoff)
+	}
+}
+
+func TestI_AnInactiveAdministratorDoesNotCountAsActiveAndWithTwoActiveOnesOneCanBeInactivated(t *testing.T) {
+	store, pool := statusStore(t)
+	first := user(t, pool, tenant, "a@example.com", pgtest.Options{}, "TENANT_ADMINISTRATOR")
+	user(t, pool, tenant, "b@example.com", pgtest.Options{Inactive: true}, "TENANT_ADMINISTRATOR")
+	if _, err := store.ChangeStatus(ctx, command(first, account.Inactive, "x")); !errors.Is(err, port.ErrLastAdministrator) {
+		t.Fatalf("an inactive administrator was counted as active: %v", err)
+	}
+	second := user(t, pool, tenant, "c@example.com", pgtest.Options{}, "TENANT_ADMINISTRATOR")
+	if _, err := store.ChangeStatus(ctx, command(first, account.Inactive, "x")); err != nil {
+		t.Fatalf("with two active administrators one can be inactivated: %v", err)
+	}
+	if _, err := store.ChangeStatus(ctx, command(second, account.Inactive, "x")); !errors.Is(err, port.ErrLastAdministrator) {
+		t.Fatalf("the other one is now the last: %v", err)
+	}
+	// reactivating an administrator is never refused by this rule
+	if _, err := store.ChangeStatus(ctx, command(first, account.Active, "back")); err != nil {
+		t.Fatalf("reactivating: %v", err)
+	}
+}
+
+func TestI_AUserThatIsNotAnAdministratorCanAlwaysBeInactivated(t *testing.T) {
+	store, pool := statusStore(t)
+	user(t, pool, tenant, "admin@example.com", pgtest.Options{}, "TENANT_ADMINISTRATOR")
+	manager := user(t, pool, tenant, "manager@example.com", pgtest.Options{}, "MANAGER")
+	if _, err := store.ChangeStatus(ctx, command(manager, account.Inactive, "x")); err != nil {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestI_TwoAdministratorsInactivatingEachOtherAtOnceLeaveOneActive(t *testing.T) {
+	for round := 0; round < 15; round++ {
+		store, pool := statusStore(t)
+		a := user(t, pool, tenant, "a@example.com", pgtest.Options{}, "TENANT_ADMINISTRATOR")
+		b := user(t, pool, tenant, "b@example.com", pgtest.Options{}, "TENANT_ADMINISTRATOR")
+		results := make(chan error, 2)
+		start := make(chan struct{})
+		for _, id := range []string{a, b} {
+			go func() {
+				<-start
+				_, err := store.ChangeStatus(ctx, command(id, account.Inactive, "x"))
+				results <- err
+			}()
+		}
+		close(start)
+		var done, refused int
+		for i := 0; i < 2; i++ {
+			switch err := <-results; {
+			case err == nil:
+				done++
+			case errors.Is(err, port.ErrLastAdministrator):
+				refused++
+			default:
+				t.Fatalf("round %d: %v", round, err)
+			}
+		}
+		var active int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM security.identity WHERE tenant_id = $1::uuid AND identity_status = 'ACTIVE'`, tenant).Scan(&active); err != nil {
+			t.Fatal(err)
+		}
+		if done != 1 || refused != 1 || active != 1 {
+			t.Fatalf("round %d: %d inactivated, %d refused, %d still active: the tenant must keep one administrator", round, done, refused, active)
+		}
+	}
+}
+
+func TestI_AnAdministratorWhoseMembershipIsNotActiveCannotActAsOneSoTheyDoNotCount(t *testing.T) {
+	store, pool := statusStore(t)
+	active := user(t, pool, tenant, "a@example.com", pgtest.Options{}, "TENANT_ADMINISTRATOR")
+	user(t, pool, tenant, "b@example.com", pgtest.Options{MembershipInactive: true}, "TENANT_ADMINISTRATOR")
+	if _, err := store.ChangeStatus(ctx, command(active, account.Inactive, "x")); !errors.Is(err, port.ErrLastAdministrator) {
+		t.Fatalf("an administrator who cannot sign in as one was counted: %v", err)
+	}
+}
