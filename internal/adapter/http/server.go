@@ -85,6 +85,9 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 		mux.Handle("POST /api/v1/security/users/{accountId}/inactivation", s.protect(s.requireTenantAdministrator(s.changeStatus(s.userStatus.Inactivate))))
 		mux.Handle("POST /api/v1/security/users/{accountId}/reactivation", s.protect(s.requireTenantAdministrator(s.changeStatus(s.userStatus.Reactivate))))
 	}
+	if s.credentialIssuer != nil {
+		mux.Handle("POST /api/v1/security/users/{accountId}/temporary-credential", s.protect(s.requireIssuer(http.HandlerFunc(s.issueTemporaryCredential))))
+	}
 	if s.linkRequester != nil && s.background != nil {
 		// public by design: a person who is waiting for a link has no token
 		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/email-verifications", s.askForLink)
@@ -107,13 +110,14 @@ type server struct {
 	change   ChangePasswordService
 	outbox   OutboxService
 
-	tenantEvents   TenantEventService
-	accounts       AccountCreator
-	accountTenants TenantFinder
-	firstAdmins    AccountCreator
-	internalUsers  AccountCreator
-	userLister     UserLister
-	userStatus     UserStatusChanger
+	tenantEvents     TenantEventService
+	accounts         AccountCreator
+	accountTenants   TenantFinder
+	firstAdmins      AccountCreator
+	internalUsers    AccountCreator
+	userLister       UserLister
+	userStatus       UserStatusChanger
+	credentialIssuer CredentialIssuer
 
 	linkRequester  LinkRequester
 	emailConfirmer EmailConfirmer

@@ -378,6 +378,61 @@ paths:
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
+  /api/v1/security/users/{accountId}/temporary-credential:
+    post:
+      summary: Issue a new temporary credential to a user
+      description: >
+        Gives a user whose temporary credential expired before the first sign-in a new one of 72 hours, which invalidates any
+        earlier one (HU-SEC-005, AC7; PDR section 9, G15 and GAP-016). The issuer types the password and its confirmation under
+        the one policy; nothing is generated and the password is never returned. It can be issued only to an account that still
+        has a temporary credential, in force or expired: one that already chose its own password is 422 BUSINESS_RULE_VIOLATION
+        (that is the recovery of HU-SEC-004). Who may issue to whom: a Tenant Administrator, to any user of its own tenant except
+        the first Administrator; the Platform Administrator, to the first Administrator of any tenant and, when the tenant has
+        no active Tenant Administrator able to sign in, to any of its active Administrators; any other issuer is 422
+        BUSINESS_RULE_VIOLATION. A user of another tenant, a customer or an id that does not exist is 404 for a Tenant
+        Administrator. Who and when are kept with the account and AccountTemporaryCredentialIssued is written in the same
+        transaction, without the password. Only a token with the role TENANT_ADMINISTRATOR and a tenant, or PLATFORM_ADMINISTRATOR
+        and none, and no access mark, is accepted.
+      operationId: issueTemporaryCredential
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueTemporaryCredentialRequest'
+      responses:
+        "200":
+          description: The user as it is now, with the end of the new credential
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
   /api/v1/security/sessions/password:
     put:
       summary: Choose the own password
@@ -1002,6 +1057,21 @@ components:
         statusChangedAt: {type: string, format: date-time, description: When the status last changed; absent if it never did}
         statusChangedBy: {type: string, description: "The actor of the last change, as tenant-administrator/<accountId>"}
         statusReason: {type: string, description: Why the status last changed}
+    IssueTemporaryCredentialRequest:
+      type: object
+      required: [password, passwordConfirmation]
+      additionalProperties: false
+      properties:
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+          description: The temporary credential; at most 72 bytes, which the password policy checks
+        passwordConfirmation:
+          type: string
+          minLength: 1
+          maxLength: 72
+          description: Must match password
     StatusChangeRequest:
       type: object
       required: [reason]
