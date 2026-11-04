@@ -138,10 +138,10 @@ func readUser(ctx context.Context, q pgx.Tx, tenantID, id string) (port.Register
 	var temporary, changedAt *time.Time
 	err := q.QueryRow(ctx, `SELECT identity_id::text, COALESCE(tenant_id::text, ''), email_normalized, identity_status, temporary_until,
 			COALESCE(full_name, ''), COALESCE(phone, ''), email_verified, r.role, created_at,
-			status_changed_at, COALESCE(status_changed_by, ''), COALESCE(status_reason, '')
+			status_changed_at, COALESCE(status_changed_by, ''), COALESCE(status_reason, ''), `+assignedPermissions+`
 		FROM security.identity `+userRole+` WHERE tenant_id = $1::uuid AND identity_id = $3::uuid`, tenantID, internalRoleNames, id).
 		Scan(&u.Account.ID, &u.Account.TenantID, &u.Account.EmailNormalized, &status, &temporary, &u.FullName, &u.Phone, &u.EmailVerified,
-			&u.Role, &u.CreatedAt, &changedAt, &u.Changed.By, &u.Changed.Reason)
+			&u.Role, &u.CreatedAt, &changedAt, &u.Changed.By, &u.Changed.Reason, &u.Permissions)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return port.Registered{}, port.ErrUserNotFound
 	}

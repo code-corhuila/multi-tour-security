@@ -43,6 +43,9 @@ type Registered struct {
 	CreatedAt     time.Time
 	// Changed is the last change of status; zero when the account never changed.
 	Changed StatusChange
+	// Permissions are the special permissions assigned to the user and held now, sorted; the ones of their profile are not here, and the
+	// answer of the routes turns them into the whole set with account.PermissionsFor. Never nil when the store read them.
+	Permissions []string
 }
 
 // AccountRegistry is where the accounts of one story are created, and the memory of which key made which account.
