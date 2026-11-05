@@ -86,11 +86,7 @@ func (s *Service) Issue(ctx context.Context, r Request) (port.Registered, error)
 	if err != nil {
 		return port.Registered{}, err
 	}
-	by := "tenant-administrator/"
-	if r.ActorRole == account.RolePlatformAdministrator {
-		by = "platform-administrator/"
-	}
-	return s.Store.Issue(ctx, port.IssueCommand{TenantID: target.TenantID, AccountID: target.AccountID, Hash: hash, By: by + r.ActorID,
+	return s.Store.Issue(ctx, port.IssueCommand{TenantID: target.TenantID, AccountID: target.AccountID, Hash: hash, By: account.By(r.ActorRole, r.ActorID),
 		ActorID: r.ActorID, ActorRole: r.ActorRole, CorrelationID: r.CorrelationID, Now: now})
 }
 

@@ -125,6 +125,7 @@ func (s *server) answerAccount(w http.ResponseWriter, r *http.Request, reg port.
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(status)
+		// the status line is already sent: an encoding error here can only be a client that went away, so there is nothing to answer
 		_ = json.NewEncoder(w).Encode(out)
 	}
 }
