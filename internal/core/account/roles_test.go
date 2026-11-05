@@ -19,6 +19,16 @@ func TestD_TheInternalRolesAreTheFiveOfTheTenantInAFixedOrder(t *testing.T) {
 	}
 }
 
+func TestD_TheAuthorOfAChangeNamesTheAdministratorRoleAndTheId(t *testing.T) {
+	id := "11111111-1111-4111-8111-111111111111"
+	if got := account.By(account.RoleTenantAdministrator, id); got != "tenant-administrator/"+id {
+		t.Fatalf("By(tenant administrator) = %q", got)
+	}
+	if got := account.By(account.RolePlatformAdministrator, id); got != "platform-administrator/"+id {
+		t.Fatalf("By(platform administrator) = %q", got)
+	}
+}
+
 func TestD_TheListOfInternalRolesIsACopyThatNobodyCanUseToChangeIt(t *testing.T) {
 	first := account.InternalRoles()
 	first[0] = "SUPERUSER"
