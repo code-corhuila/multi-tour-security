@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Multitour security
-  version: 0.6.0
+  version: 0.7.0
   description: >
     The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
     (ADR-004 D7). It carries only the operations the service implements; every story adds its operations here
@@ -991,6 +991,172 @@ paths:
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
+  /api/v1/security/public/tenants/{identifier}/password-recoveries:
+    post:
+      summary: Ask for a password recovery code
+      description: >
+        A person gives the e-mail of their account in the tenant of the link /t/{identifier}; an unknown identifier is 202 too. The answer is always 202 with no body when the request is
+        well formed, whether the account exists, is inactive, belongs to another tenant, already received three codes in
+        the last hour, or the tenant is not active, so the route tells nobody which e-mails have an account (HU-SEC-004,
+        RN-SEC-006-01). The work is done after the answer: a code of eight digits is sent only to an ACTIVE or PENDING
+        account of an active tenant that received fewer than three codes in the last hour; it lasts 30 minutes, works
+        once and retires every earlier code of the account. It takes no Idempotency-Key. A malformed body, or an e-mail
+        that cannot be one, is 400. The design contract also lists 500; this service never answers it here, because
+        nothing is done before the answer.
+      operationId: requestPasswordRecovery
+      tags: [Accounts]
+      security: []
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          description: Identifier of the tenant, lowercase kebab-case
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 40
+            pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordRecoveryRequest'
+      responses:
+        "202":
+          description: Accepted; a code is sent only when the rules allow it
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/public/tenants/{identifier}/password-recoveries/resets:
+    post:
+      summary: Reset the password with the code
+      description: >
+        Takes the e-mail, the code of eight digits, the new password and its confirmation (HU-SEC-004). The shape is
+        judged first, so a password that breaks the policy or a confirmation that differs is 400 with its field and burns
+        no try of the code. Every refused code (wrong, used, expired, retired, an e-mail with no account, an inactive
+        account, an account of another tenant) is one 422 BUSINESS_RULE_VIOLATION with the same message; five wrong tries
+        retire the code. On success the password is replaced, the block of failed sign-ins is lifted, every session of the
+        account ends and the facts are written. No answer carries a password or the code.
+      operationId: resetPassword
+      tags: [Accounts]
+      security: []
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          description: Identifier of the tenant, lowercase kebab-case
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 40
+            pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        "204":
+          description: The password is replaced and every session of the account ended
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/public/platform/password-recoveries:
+    post:
+      summary: Ask for a password recovery code (Platform Administrator)
+      description: >
+        A person gives the e-mail of their account at /platform: the account that has no tenant. The answer is always 202 with no body when the request is
+        well formed, whether the account exists, is inactive, belongs to another tenant, already received three codes in
+        the last hour, or the tenant is not active, so the route tells nobody which e-mails have an account (HU-SEC-004,
+        RN-SEC-006-01). The work is done after the answer: a code of eight digits is sent only to an ACTIVE or PENDING
+        account of an active tenant that received fewer than three codes in the last hour; it lasts 30 minutes, works
+        once and retires every earlier code of the account. It takes no Idempotency-Key. A malformed body, or an e-mail
+        that cannot be one, is 400. The design contract also lists 500; this service never answers it here, because
+        nothing is done before the answer.
+      operationId: requestPlatformPasswordRecovery
+      tags: [Accounts]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordRecoveryRequest'
+      responses:
+        "202":
+          description: Accepted; a code is sent only when the rules allow it
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/public/platform/password-recoveries/resets:
+    post:
+      summary: Reset the password with the code (Platform Administrator)
+      description: >
+        Takes the e-mail, the code of eight digits, the new password and its confirmation (HU-SEC-004). The shape is
+        judged first, so a password that breaks the policy or a confirmation that differs is 400 with its field and burns
+        no try of the code. Every refused code (wrong, used, expired, retired, an e-mail with no account, an inactive
+        account, an account of another tenant) is one 422 BUSINESS_RULE_VIOLATION with the same message; five wrong tries
+        retire the code. On success the password is replaced, the block of failed sign-ins is lifted, every session of the
+        account ends and the facts are written. No answer carries a password or the code.
+      operationId: resetPlatformPassword
+      tags: [Accounts]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        "204":
+          description: The password is replaced and every session of the account ended
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
 components:
   parameters:
     IdempotencyKey:
@@ -1122,6 +1288,30 @@ components:
           type: string
           minLength: 20
           maxLength: 256
+    PasswordRecoveryRequest:
+      type: object
+      required: [email]
+      additionalProperties: false
+      properties:
+        email: {type: string, minLength: 3, maxLength: 254}
+    PasswordResetRequest:
+      type: object
+      required: [email, code, newPassword, newPasswordConfirmation]
+      additionalProperties: false
+      properties:
+        email: {type: string, minLength: 3, maxLength: 254}
+        code:
+          type: string
+          description: The code of eight digits received by e-mail
+          pattern: '^[0-9]{8}$'
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 72
+        newPasswordConfirmation:
+          type: string
+          minLength: 1
+          maxLength: 72
     EmailVerificationRequest:
       type: object
       required: [email]
