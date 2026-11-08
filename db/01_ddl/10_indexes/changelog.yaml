@@ -89,3 +89,20 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+  - changeSet:
+      id: security-ddl-indexes-006
+      author: Molina211
+      labels: "HU-SEC-004,ddl,indexes"
+      comment: "The index of the codes of an account by creation time (HU-SEC-004, plan D-03)."
+      changes:
+        - sqlFile:
+            path: 006_create_recovery_code_indexes.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/006_create_recovery_code_indexes.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

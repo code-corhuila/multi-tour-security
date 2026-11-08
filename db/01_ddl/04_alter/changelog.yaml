@@ -141,3 +141,20 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+  - changeSet:
+      id: security-ddl-alter-009
+      author: Molina211
+      labels: "HU-SEC-004,ddl,alter"
+      comment: "A code follows its account (HU-SEC-004, plan D-03)."
+      changes:
+        - sqlFile:
+            path: 009_add_recovery_code_foreign_key.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/009_add_recovery_code_foreign_key.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
