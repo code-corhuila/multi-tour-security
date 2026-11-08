@@ -33,6 +33,7 @@ A Final Customer registers as `PENDING` and receives a link that lasts 24 hours 
 | `SMTP_USER`, `SMTP_PASSWORD` | Both or none; PLAIN authentication only over TLS or to a local server |
 | `SMTP_REQUIRE_TLS` | `true` by default. `false` is accepted only for a local host (`localhost`, a loopback address or a name without dots such as `mailpit`) |
 | `PUBLIC_BASE_URL` | Origin of the portal in the link, `https` unless the mail server is local |
+| `RECOVERY_CODE_KEY` | Secret of the HMAC of the password recovery codes, at least 32 bytes (`openssl rand -base64 32`), different in each environment; the service stops at start without it. Never versioned |
 
 In development nothing is sent: the `mail-capture` profile of `deploy/compose.yml` starts [Mailpit](https://mailpit.axllent.org), which keeps every e-mail. Set `SMTP_HOST=mailpit`, `SMTP_PORT=1025`, `SMTP_REQUIRE_TLS=false`, `PUBLIC_BASE_URL=http://localhost:4200` and `COMPOSE_PROFILES=mail-capture` in `env/dev.env` of `multi-tour-infra-postgres`, then run `scripts/up.sh dev`. Mailpit publishes no port to the host; read the mailbox from inside the network, for example `docker exec multi-tour-dev-front-1 wget -qO- http://mailpit:8025/api/v1/messages`. The link carries the value after `#`, so it never reaches a server log: `{PUBLIC_BASE_URL}/t/{identifier}/verificar-correo#token=...`.
 

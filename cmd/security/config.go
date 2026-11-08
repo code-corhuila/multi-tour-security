@@ -18,6 +18,8 @@ const (
 	defaultPort = "8086"
 	// minKeyBits is the smallest RSA key the service signs or verifies with.
 	minKeyBits = 2048
+	// minRecoveryKeyBytes is the shortest key of the recovery codes the service starts with: the size of an HMAC-SHA-256 key.
+	minRecoveryKeyBytes = 32
 )
 
 type config struct {
@@ -26,6 +28,9 @@ type config struct {
 	privateKey  *rsa.PrivateKey
 	publicKey   *rsa.PublicKey
 	mail        smtpmail.Config
+	// recoveryKey is the secret of the HMAC of the recovery codes: with 10^8 possible codes, a code kept as a plain hash could be
+	// reversed from a copy of the database, and this key is what that copy does not have (HU-SEC-004, plan D-02).
+	recoveryKey []byte
 }
 
 // String and GoString keep the database password and the keys out of any printed value.
@@ -48,6 +53,7 @@ func loadConfig(getenv func(string) string, readFile func(string) ([]byte, error
 	publicPath := need("JWT_PUBLIC_KEY_FILE")
 	// the e-mail that carries a credential: nothing is guessed, so a service that cannot send does not start
 	mailHost, mailPort, mailFrom, baseURL := need("SMTP_HOST"), need("SMTP_PORT"), need("SMTP_FROM"), need("PUBLIC_BASE_URL")
+	recoveryKey := need("RECOVERY_CODE_KEY")
 	if len(missing) > 0 {
 		return config{}, fmt.Errorf("missing required variables: %s (set them in env/<environment>.env of multi-tour-infra-postgres)", strings.Join(missing, ", "))
 	}
@@ -67,6 +73,10 @@ func loadConfig(getenv func(string) string, readFile func(string) ([]byte, error
 		return config{}, errors.New("JWT_PUBLIC_KEY_FILE is not the public half of JWT_PRIVATE_KEY_FILE")
 	}
 
+	if len(recoveryKey) < minRecoveryKeyBytes {
+		return config{}, fmt.Errorf("RECOVERY_CODE_KEY must be at least %d bytes (for example `openssl rand -base64 32`)", minRecoveryKeyBytes)
+	}
+
 	port := getenv("HTTP_PORT")
 	if port == "" {
 		port = defaultPort
@@ -78,7 +88,7 @@ func loadConfig(getenv func(string) string, readFile func(string) ([]byte, error
 	if err != nil {
 		return config{}, err
 	}
-	return config{port: port, databaseURL: databaseURL, privateKey: privateKey, publicKey: publicKey, mail: mail}, nil
+	return config{port: port, databaseURL: databaseURL, privateKey: privateKey, publicKey: publicKey, mail: mail, recoveryKey: []byte(recoveryKey)}, nil
 }
 
 // loadMail reads the settings of the sender. TLS is required unless SMTP_REQUIRE_TLS says false: forgetting the variable

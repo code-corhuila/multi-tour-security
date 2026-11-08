@@ -19,6 +19,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/listusers"
 	"github.com/code-corhuila/multi-tour-security/internal/core/optionalrole"
 	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
+	"github.com/code-corhuila/multi-tour-security/internal/core/recoverpassword"
 	"github.com/code-corhuila/multi-tour-security/internal/core/refresh"
 	"github.com/code-corhuila/multi-tour-security/internal/core/requestlink"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
@@ -58,6 +59,10 @@ func build(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Handler, *
 	}
 	askForLink := &requestlink.Service{Tenants: tenants, Accounts: accounts, Verifications: links, Mailer: mailer, Random: rand.Reader, Clock: time.Now}
 	confirmEmail := &verifyemail.Service{Tenants: tenants, Accounts: accounts, Verifications: links, Hasher: bcryptadapter.Hasher{}, Clock: time.Now}
+	recovery := &recoverpassword.Service{
+		Tenants: tenants, Accounts: accounts, Codes: postgres.NewRecoveryCodes(pool), Mailer: mailer, Hasher: bcryptadapter.Hasher{},
+		Key: cfg.recoveryKey, Random: rand.Reader, Clock: time.Now,
+	}
 	events := &outbox.Service{Store: postgres.NewOutbox(pool), Clock: time.Now, Policy: outbox.DefaultPolicy}
 	background := httpadapter.NewBackground(logger, backgroundTimeout, 2*dbPoolSize)
 	return httpadapter.New(httpadapter.NewVerifier(cfg.publicKey), logger,
@@ -69,5 +74,6 @@ func build(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Handler, *
 		httpadapter.WithChangeUserStatus(&changestatus.Service{Store: postgres.NewUserStatus(pool), Clock: time.Now}),
 		httpadapter.WithOutbox(events),
 		httpadapter.WithTenantEvents(&tenantevent.Service{Tenants: tenants}),
-		httpadapter.WithLinkRequests(askForLink, background), httpadapter.WithEmailConfirmation(confirmEmail)), background, nil
+		httpadapter.WithLinkRequests(askForLink, background), httpadapter.WithEmailConfirmation(confirmEmail),
+		httpadapter.WithPasswordRecovery(recovery, recovery, background)), background, nil
 }
