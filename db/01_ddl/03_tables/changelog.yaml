@@ -87,3 +87,20 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+  - changeSet:
+      id: security-ddl-tables-006
+      author: Molina211
+      labels: "HU-SEC-004,ddl,tables"
+      comment: "The codes of the password recovery, kept only as an HMAC (HU-SEC-004, plan D-02 and D-03)."
+      changes:
+        - sqlFile:
+            path: 006_create_recovery_code.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/006_create_recovery_code.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
