@@ -33,7 +33,6 @@ A Final Customer registers as `PENDING` and receives a link that lasts 24 hours 
 | `SMTP_USER`, `SMTP_PASSWORD` | Both or none; PLAIN authentication only over TLS or to a local server |
 | `SMTP_REQUIRE_TLS` | `true` by default. `false` is accepted only for a local host (`localhost`, a loopback address or a name without dots such as `mailpit`) |
 | `PUBLIC_BASE_URL` | Origin of the portal in the link, `https` unless the mail server is local |
-| `RECOVERY_CODE_KEY` | Secret of the HMAC of the password recovery codes, at least 32 bytes (`openssl rand -base64 32`), different in each environment; the service stops at start without it. Never versioned |
 
 In development nothing is sent: the `mail-capture` profile of `deploy/compose.yml` starts [Mailpit](https://mailpit.axllent.org), which keeps every e-mail. Set `SMTP_HOST=mailpit`, `SMTP_PORT=1025`, `SMTP_REQUIRE_TLS=false`, `PUBLIC_BASE_URL=http://localhost:4200` and `COMPOSE_PROFILES=mail-capture` in `env/dev.env` of `multi-tour-infra-postgres`, then run `scripts/up.sh dev`. Mailpit publishes no port to the host; read the mailbox from inside the network, for example `docker exec multi-tour-dev-front-1 wget -qO- http://mailpit:8025/api/v1/messages`. The link carries the value after `#`, so it never reaches a server log: `{PUBLIC_BASE_URL}/t/{identifier}/verificar-correo#token=...`.
 
@@ -45,6 +44,21 @@ Try it through the gateway (`http://localhost:8080`):
 4. `POST .../email-verifications` asks for another link and always answers `202`, whether or not the e-mail exists. At most 3 links per hour per account (the first one counts); a new link retires the earlier ones.
 
 A failed send never fails the registration: it is recorded in `email_verification.send_failed_at` and `send_error` (never with the link) and the person asks again.
+
+## Password recovery
+
+A person who forgot the password asks for a code of 8 digits and chooses a new password with it (HU-SEC-004). The code is sent by e-mail with the same SMTP variables as the verification link, lasts 30 minutes, works once, and only the newest code of an account works. Five wrong tries retire the code; at most 3 codes per hour per account. The database keeps only an HMAC of the code, never the code.
+
+| Variable | Meaning |
+|---|---|
+| `RECOVERY_CODE_KEY` | Secret of the HMAC of the codes, at least 32 bytes (`openssl rand -base64 32`), different in each environment; the service stops at start without it. Never versioned |
+
+Public routes, with no token, for a tenant and, under `/platform/`, for the Platform Administrator:
+
+1. `POST /api/v1/security/public/tenants/{identifier}/password-recoveries` asks for a code and always answers `202`, whether or not the e-mail has an account.
+2. `POST .../password-recoveries/resets` takes `email`, `code`, `newPassword` and `newPasswordConfirmation`. It answers `204`: the password is replaced, the failed-sign-in block is lifted, every session of the account ends and a pending account becomes `ACTIVE`. Every refused code (wrong, used, expired, retired, no account, inactive, other tenant) is the same `422`; a bad shape is `400` with the field.
+
+The facts `PasswordRecoveryRequested`, `PasswordReset`, `PasswordResetFailed` (administrative accounts only) and `AccountSessionsRevoked` go to the outbox in the same statement. What is not built: the e-mail notice to the administrators when an administrative password is reset (HU-WRK-004, job 4).
 
 ## Where the data is
 
@@ -68,7 +82,7 @@ Run beside the server, with the same binary and the variables exported in the sh
 
 ## Still to come
 
-The stories that recover the password and grant special permissions and optional roles: see `07-api/specs/multi-tour-security/` in `multi-tour-docs`.
+The e-mail notice to the administrators of a password reset (HU-WRK-004): see `07-api/specs/multi-tour-security/` in `multi-tour-docs`.
 
 ## Branching
 
