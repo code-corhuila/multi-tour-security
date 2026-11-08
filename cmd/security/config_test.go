@@ -53,6 +53,7 @@ func environment(files keyFiles, overrides map[string]string) func(string) strin
 		"SMTP_FROM":            "no-reply@multitour.example",
 		"SMTP_REQUIRE_TLS":     "false",
 		"PUBLIC_BASE_URL":      "http://localhost:4200",
+		"RECOVERY_CODE_KEY":    strings.Repeat("k", 32),
 	}
 	for name, value := range overrides {
 		env[name] = value
