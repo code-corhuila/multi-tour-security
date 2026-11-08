@@ -474,7 +474,7 @@ psql_admin -c "$(identity "'$T1'" ana@example.com PENDING)" \
            -c "INSERT INTO security.email_verification (identity_id, token_hash, expires_at) SELECT identity_id, '$LINK_HASH', now() + interval '1 day' FROM security.identity" \
            -c "UPDATE security.identity SET email_verified_at = now()" \
            -c "INSERT INTO security.tenant_copy (tenant_id, identifier, status, occurred_at, commercial_name) VALUES ('$T1', 'acme-tours', 'ACTIVE', now(), 'Acme Tours SAS')" \
-           -c "INSERT INTO security.recovery_code (identity_id, code_hmac, expires_at) SELECT identity_id, '$RECOVERY_HMAC', now() + interval '30 minutes' FROM security.identity"            -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity" \
+           -c "INSERT INTO security.recovery_code (identity_id, code_hmac, expires_at) SELECT identity_id, '$RECOVERY_HMAC', now() + interval '30 minutes' FROM security.identity" \n           -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity" \
            -c "INSERT INTO security.membership_permission (membership_id, permission, granted_at, granted_by) SELECT membership_id, 'MANAGE_CASH', now(), 'tenant-administrator/x' FROM security.membership" \
            -c "INSERT INTO security.tenant_optional_role (tenant_id, role, enabled, changed_at, changed_by) VALUES ('$T1', 'MANAGER', true, now(), 'tenant-administrator/x')" >/dev/null
 check "I·db_ci_rolls_back_to_empty" rolled_back_to_empty
