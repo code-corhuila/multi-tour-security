@@ -26,15 +26,15 @@ func NewTemporaryCredentials(pool *pgxpool.Pool) *TemporaryCredentials {
 const credentialTarget = `
 SELECT i.identity_id::text, i.tenant_id::text, i.identity_status = 'ACTIVE', i.temporary_until IS NOT NULL,
        EXISTS (SELECT 1 FROM security.membership m JOIN security.membership_role mr USING (membership_id)
-               WHERE m.identity_id = i.identity_id AND m.membership_status = 'ACTIVE' AND mr.role = 'TENANT_ADMINISTRATOR'),
+               WHERE m.identity_id = i.identity_id AND m.membership_status = 'ACTIVE' AND mr.role = 'TENANT_ADMINISTRATOR' AND mr.role_status = 'ACTIVE'),
        EXISTS (SELECT 1 FROM security.membership m JOIN security.membership_role mr USING (membership_id)
-               WHERE m.identity_id = i.identity_id AND m.membership_status = 'ACTIVE' AND mr.role = 'TENANT_ADMINISTRATOR'
+               WHERE m.identity_id = i.identity_id AND m.membership_status = 'ACTIVE' AND mr.role = 'TENANT_ADMINISTRATOR' AND mr.role_status = 'ACTIVE'
                  AND m.created_by LIKE 'service/%'),
        (SELECT count(*) FROM security.identity a WHERE a.tenant_id = i.tenant_id AND a.identity_status = 'ACTIVE'
             AND (a.blocked_until IS NULL OR a.blocked_until <= $2::timestamptz)
             AND (a.temporary_until IS NULL OR a.temporary_until > $2::timestamptz)
             AND EXISTS (SELECT 1 FROM security.membership m JOIN security.membership_role mr USING (membership_id)
-                        WHERE m.identity_id = a.identity_id AND m.membership_status = 'ACTIVE' AND mr.role = 'TENANT_ADMINISTRATOR'))
+                        WHERE m.identity_id = a.identity_id AND m.membership_status = 'ACTIVE' AND mr.role = 'TENANT_ADMINISTRATOR' AND mr.role_status = 'ACTIVE'))
 FROM security.identity i
 WHERE i.identity_id = $1::uuid AND i.tenant_id IS NOT NULL AND EXISTS (SELECT 1 FROM security.membership m
         JOIN security.membership_role mr USING (membership_id) WHERE m.identity_id = i.identity_id AND mr.role = ANY($3))`
