@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Multitour security
-  version: 0.8.0
+  version: 0.9.0
   description: >
     The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
     (ADR-004 D7). It carries only the operations the service implements; every story adds its operations here
@@ -186,6 +186,104 @@ paths:
         "415":
           $ref: '#/components/responses/Error'
         "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/platform-support-accesses:
+    post:
+      summary: Ask for a support access to a tenant
+      description: >
+        The Platform Administrator asks to enter one tenant for support (HU-SEC-007, part A): a reason of 1 to 500 characters, the areas
+        needed from the closed list RESERVATIONS, CATALOG, OPERATIONS, CASH and CUSTOMERS (never the sensitive data) and 1 to 24 hours.
+        The request waits 72 hours for a Tenant Administrator of that tenant, then it is EXPIRED. A tenant that does not exist or is
+        pending or failed is 404; an inactive one is accepted. A field that is not in the contract is 400. The same Idempotency-Key
+        answers the same request with 200. Only a token with the role PLATFORM_ADMINISTRATOR, no tenant and no access mark is accepted.
+      operationId: askForSupportAccess
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSupportAccessRequest'
+      responses:
+        "201":
+          description: The support access was asked for
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccess'
+        "200":
+          description: The same key already asked for it; the request as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccess'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+    get:
+      summary: List the support accesses the Platform Administrator asked for
+      description: >
+        Only the requests of the caller, newest first, with the listing envelope. status narrows to one status; a parameter that is not
+        declared, a repeated one or a value out of range is 400. Only a token with the role PLATFORM_ADMINISTRATOR, no tenant and no
+        access mark is accepted.
+      operationId: listPlatformSupportAccesses
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: status
+          in: query
+          schema: {$ref: '#/components/schemas/SupportAccessStatus'}
+      responses:
+        "200":
+          description: One page of support accesses
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccessPage'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
@@ -1532,6 +1630,67 @@ components:
           minLength: 1
           maxLength: 500
           description: Why the access is cut or given back; kept with the account
+    SupportArea:
+      type: string
+      description: The areas a support access may read, read only; the sensitive data are never among them
+      enum: [RESERVATIONS, CATALOG, OPERATIONS, CASH, CUSTOMERS]
+    SupportAccessStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED, EXPIRED, CLOSED]
+    CreateSupportAccessRequest:
+      type: object
+      required: [tenantId, reason, areas, hours]
+      additionalProperties: false
+      properties:
+        tenantId: {type: string, format: uuid}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        areas:
+          type: array
+          minItems: 1
+          maxItems: 5
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/SupportArea'
+        hours: {type: integer, minimum: 1, maximum: 24}
+    SupportAccess:
+      type: object
+      required: [supportAccessId, tenantId, status, reason, areas, hours, requestedBy, requestedAt]
+      properties:
+        supportAccessId: {type: string, format: uuid}
+        tenantId: {type: string, format: uuid}
+        status:
+          $ref: '#/components/schemas/SupportAccessStatus'
+        reason: {type: string}
+        areas:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupportArea'
+        hours: {type: integer}
+        requestedBy: {type: string}
+        requestedAt: {type: string, format: date-time}
+        decidedBy: {type: string}
+        decidedAt: {type: string, format: date-time}
+        decisionReason: {type: string}
+        expiresAt: {type: string, format: date-time}
+        openedAt: {type: string, format: date-time}
+        closedAt: {type: string, format: date-time}
+        closedReason: {type: string}
+    SupportAccessPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupportAccess'
+        meta:
+          type: object
+          required: [page, limit, total, totalPages]
+          properties:
+            page: {type: integer, minimum: 1}
+            limit: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, minimum: 0}
+            totalPages: {type: integer, minimum: 0}
     AccountPage:
       type: object
       required: [data, meta]

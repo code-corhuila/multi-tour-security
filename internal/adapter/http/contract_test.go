@@ -472,7 +472,7 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 	}
 
 	// the support access of the Platform Administrator (HU-SEC-007 part A): ask and list the own requests
-	platformAdmin := platformToken(t)
+	platformAdmin := platformAdminToken(t)
 	tenantAdmin := tokenWith(t, []string{"TENANT_ADMINISTRATOR"}, accountTenant, "")
 	bigSupport := `{"tenantId":"3f2b8c1e-5d4a-4f6b-9c7d-1a2b3c4d5e6f","reason":"` + strings.Repeat("r", 4200) + `","areas":["CASH"],"hours":1}`
 	supportPage := supportrequest.Page{Data: []supportaccess.Access{askedAccess()}, Page: 1, Limit: 20, Total: 1, TotalPages: 1}

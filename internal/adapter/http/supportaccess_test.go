@@ -48,7 +48,7 @@ func supportHandler(svc httpadapter.SupportRequester, logs io.Writer) http.Handl
 	return httpadapter.New(httpadapter.NewVerifier(&routeKey.PublicKey), slog.New(slog.NewJSONHandler(logs, nil)), httpadapter.WithSupportRequests(svc))
 }
 
-func platformToken(t *testing.T) string {
+func platformAdminToken(t *testing.T) string {
 	return tokenWith(t, []string{"PLATFORM_ADMINISTRATOR"}, "", "")
 }
 
@@ -78,7 +78,7 @@ func supportCall(h http.Handler, method, path, token, contentType, body, key str
 
 func TestC_ThePlatformAdministratorAsksAndTheUseCaseGetsTheCallerNotTheBody(t *testing.T) {
 	svc := &fakeSupport{access: askedAccess(), created: true}
-	rec := supportCall(supportHandler(svc, io.Discard), http.MethodPost, supportRoute, platformToken(t), "application/json", supportBody, supportKey)
+	rec := supportCall(supportHandler(svc, io.Discard), http.MethodPost, supportRoute, platformAdminToken(t), "application/json", supportBody, supportKey)
 	if rec.Code != http.StatusCreated || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("%d %v %s", rec.Code, rec.Header(), rec.Body)
 	}
@@ -102,7 +102,7 @@ func TestC_ThePlatformAdministratorAsksAndTheUseCaseGetsTheCallerNotTheBody(t *t
 
 func TestC_TheSameKeyAnswers200WithTheSameRequest(t *testing.T) {
 	svc := &fakeSupport{access: askedAccess(), created: false}
-	rec := supportCall(supportHandler(svc, io.Discard), http.MethodPost, supportRoute, platformToken(t), "application/json", supportBody, supportKey)
+	rec := supportCall(supportHandler(svc, io.Discard), http.MethodPost, supportRoute, platformAdminToken(t), "application/json", supportBody, supportKey)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
@@ -147,7 +147,7 @@ func TestC_ABadBodyIsRefusedBeforeTheUseCase(t *testing.T) {
 	}
 	for name, c := range cases {
 		svc := &fakeSupport{}
-		rec := supportCall(supportHandler(svc, io.Discard), http.MethodPost, supportRoute, platformToken(t), c.contentType, c.body, supportKey)
+		rec := supportCall(supportHandler(svc, io.Discard), http.MethodPost, supportRoute, platformAdminToken(t), c.contentType, c.body, supportKey)
 		if rec.Code != c.status || len(svc.asked) != 0 {
 			t.Errorf("%s: %d %s", name, rec.Code, rec.Body)
 		}
@@ -156,17 +156,17 @@ func TestC_ABadBodyIsRefusedBeforeTheUseCase(t *testing.T) {
 
 func TestC_AFieldTheUseCaseRefusesIsNamedAndATenantThatIsNotThereIs404(t *testing.T) {
 	svc := &fakeSupport{err: &supportrequest.FieldError{Field: "areas", Err: errors.New("is not valid")}}
-	rec := supportCall(supportHandler(svc, io.Discard), http.MethodPost, supportRoute, platformToken(t), "application/json", supportBody, supportKey)
+	rec := supportCall(supportHandler(svc, io.Discard), http.MethodPost, supportRoute, platformAdminToken(t), "application/json", supportBody, supportKey)
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"field":"areas"`) {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 	// the tenant comes in the body, so a wrong one is a fault of the caller too
 	svc = &fakeSupport{err: &supportrequest.FieldError{Field: "tenantId", Err: errors.New("is not valid")}}
-	if rec := supportCall(supportHandler(svc, io.Discard), http.MethodPost, supportRoute, platformToken(t), "application/json", supportBody, supportKey); rec.Code != http.StatusBadRequest {
+	if rec := supportCall(supportHandler(svc, io.Discard), http.MethodPost, supportRoute, platformAdminToken(t), "application/json", supportBody, supportKey); rec.Code != http.StatusBadRequest {
 		t.Fatalf("tenantId: %d %s", rec.Code, rec.Body)
 	}
 	svc = &fakeSupport{err: supportrequest.ErrTenantNotFound}
-	if rec := supportCall(supportHandler(svc, io.Discard), http.MethodPost, supportRoute, platformToken(t), "application/json", supportBody, supportKey); rec.Code != http.StatusNotFound {
+	if rec := supportCall(supportHandler(svc, io.Discard), http.MethodPost, supportRoute, platformAdminToken(t), "application/json", supportBody, supportKey); rec.Code != http.StatusNotFound {
 		t.Fatalf("not found: %d %s", rec.Code, rec.Body)
 	}
 }
@@ -174,8 +174,10 @@ func TestC_AFieldTheUseCaseRefusesIsNamedAndATenantThatIsNotThereIs404(t *testin
 func TestC_AFailureOfTheUseCaseIsAnInternalErrorWithNoDetail(t *testing.T) {
 	var logs strings.Builder
 	svc := &fakeSupport{err: errors.New("pq: connection refused at db-host-7")}
-	rec := supportCall(supportHandler(svc, &logs), http.MethodPost, supportRoute, platformToken(t), "application/json", supportBody, supportKey)
-	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "db-host-7") || !strings.Contains(logs.String(), "db-host-7") {
+	rec := supportCall(supportHandler(svc, &logs), http.MethodPost, supportRoute, platformAdminToken(t), "application/json", supportBody, supportKey)
+	// the cause stays out of the answer and out of the log: only its type and the trace id are written, as for every route
+	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "db-host-7") || strings.Contains(logs.String(), "db-host-7") ||
+		!strings.Contains(logs.String(), "asking for a support access failed") || !strings.Contains(logs.String(), "sup-1") {
 		t.Fatalf("%d %s / log %s", rec.Code, rec.Body, logs.String())
 	}
 }
@@ -183,7 +185,7 @@ func TestC_AFailureOfTheUseCaseIsAnInternalErrorWithNoDetail(t *testing.T) {
 func TestC_TheListIsOfTheCallerAndItsParametersAreTheDeclaredOnes(t *testing.T) {
 	svc := &fakeSupport{page: supportrequest.Page{Data: []supportaccess.Access{askedAccess()}, Page: 2, Limit: 10, Total: 11, TotalPages: 2}}
 	h := supportHandler(svc, io.Discard)
-	rec := supportCall(h, http.MethodGet, supportRoute+"?page=2&limit=10&status=PENDING", platformToken(t), "", "", "")
+	rec := supportCall(h, http.MethodGet, supportRoute+"?page=2&limit=10&status=PENDING", platformAdminToken(t), "", "", "")
 	if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("%d %v %s", rec.Code, rec.Header(), rec.Body)
 	}
@@ -199,12 +201,12 @@ func TestC_TheListIsOfTheCallerAndItsParametersAreTheDeclaredOnes(t *testing.T) 
 	}
 	for _, bad := range []string{"?tenantId=x", "?status=", "?status=A&status=B", "?page=x", "?limit=-1", "?page=1;"} {
 		before := len(svc.queries)
-		if rec := supportCall(h, http.MethodGet, supportRoute+bad, platformToken(t), "", "", ""); rec.Code != http.StatusBadRequest || len(svc.queries) != before {
+		if rec := supportCall(h, http.MethodGet, supportRoute+bad, platformAdminToken(t), "", "", ""); rec.Code != http.StatusBadRequest || len(svc.queries) != before {
 			t.Errorf("%s: %d", bad, rec.Code)
 		}
 	}
 	svc.err = &supportrequest.FieldError{Field: "limit", Err: errors.New("is not valid")}
-	if rec := supportCall(h, http.MethodGet, supportRoute+"?limit=1000", platformToken(t), "", "", ""); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"field":"limit"`) {
+	if rec := supportCall(h, http.MethodGet, supportRoute+"?limit=1000", platformAdminToken(t), "", "", ""); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"field":"limit"`) {
 		t.Errorf("%d %s", rec.Code, rec.Body)
 	}
 }
