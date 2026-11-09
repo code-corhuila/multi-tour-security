@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Multitour security
-  version: 0.10.0
+  version: 0.11.0
   description: >
     The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
     (ADR-004 D7). It carries only the operations the service implements; every story adds its operations here
@@ -376,6 +376,97 @@ paths:
         INVALID_STATUS_TRANSITION; a request of another tenant or one that does not exist is 404; a field that is not in the contract is 400.
         Only a token with the role TENANT_ADMINISTRATOR and a tenant is accepted, with no mark or with the restricted access.
       operationId: rejectSupportAccess
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: supportAccessId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusChangeRequest'
+      responses:
+        "200":
+          description: The support access as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccess'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/platform-support-accesses/{supportAccessId}/token:
+    post:
+      summary: Take the token of an approved support access
+      description: >
+        The Platform Administrator who asked for the access takes a token with `access: exceptional`, the `scope` of the approved areas and the
+        `authorizationId`, which ends when the access ends (never more than 24 hours). The first call opens the access and writes
+        `PlatformExceptionalAccessOpened`; a later call gives a new token and writes nothing. An access that is not approved, is over or is already
+        closed is 422 INVALID_STATUS_TRANSITION; one that does not exist or is another administrator's is 404. Only the ordinary session of the
+        Platform Administrator is accepted: not a restricted token and not the exceptional token itself. The token is never logged.
+      operationId: takeSupportAccessToken
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: supportAccessId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The token of the access
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccessToken'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/platform-support-accesses/{supportAccessId}/closure:
+    post:
+      summary: Close a support access before its time
+      description: >
+        The Platform Administrator who asked for the access closes it with a reason of 1 to 500 characters, using the ordinary session or the
+        exceptional token of that same access (never the token of another one). Sessions of that administrator are cut (`AccountSessionsRevoked`,
+        reason `SUPPORT_ACCESS_CLOSED`) and, if the access had been opened, `PlatformExceptionalAccessClosed` with `endedBy: CLOSED_EARLY` is written.
+        An access that is not approved or is over is 422 INVALID_STATUS_TRANSITION; one that does not exist or is another administrator's is 404.
+      operationId: closeSupportAccess
       tags: [Support access]
       security:
         - bearerAuth: []
@@ -1783,6 +1874,18 @@ components:
           items:
             $ref: '#/components/schemas/SupportArea'
         hours: {type: integer, minimum: 1, maximum: 24}
+    SupportAccessToken:
+      type: object
+      required: [accessToken, tokenType, expiresIn, expiresAt, scope, authorizationId]
+      properties:
+        accessToken: {type: string}
+        tokenType: {type: string, enum: [Bearer]}
+        expiresIn: {type: integer, description: Seconds until the access ends}
+        expiresAt: {type: string, format: date-time}
+        scope:
+          type: array
+          items: {type: string, enum: [RESERVATIONS, CATALOG, OPERATIONS, CASH, CUSTOMERS]}
+        authorizationId: {type: string, format: uuid}
     SupportAccess:
       type: object
       required: [supportAccessId, tenantId, status, reason, areas, hours, requestedBy, requestedAt]
