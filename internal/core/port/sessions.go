@@ -18,12 +18,14 @@ var (
 type Renewed struct {
 	AccountID string
 	SessionID string
+	// Context is the side the session was opened for (account.ContextCustomer or account.ContextTeam), empty for an account with one side.
+	Context string
 }
 
 // Sessions keeps the sessions and the hashes of their renewal values.
 type Sessions interface {
-	// Open starts a session of Life with its first value, both or neither.
-	Open(ctx context.Context, accountID, valueHash string, now time.Time) (sessionID string, err error)
+	// Open starts a session of Life with its first value, both or neither. side is the context of the sign-in, empty for an account with one side.
+	Open(ctx context.Context, accountID, valueHash, side string, now time.Time) (sessionID string, err error)
 	// Rotate consumes oldHash and stores newHash in one transaction. The second use of a value revokes its session,
 	// and that revocation stands although the call returns ErrRefreshReused.
 	Rotate(ctx context.Context, oldHash, newHash string, now time.Time) (Renewed, error)
