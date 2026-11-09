@@ -64,10 +64,12 @@ func (s *Service) Renew(ctx context.Context, value string) (signin.Tokens, error
 	if !found || acct.Status == account.Inactive || acct.UsesTemporaryCredential(now) {
 		return signin.Tokens{}, signin.ErrRefused
 	}
-	roles, err := s.Accounts.RolesOf(ctx, acct.ID)
+	held, err := s.Accounts.RolesOf(ctx, acct.ID)
 	if err != nil {
 		return signin.Tokens{}, err
 	}
+	// the side of the sign-in, never a wider one (HU-SEC-008)
+	_, roles := account.ForContext(held, renewed.Context)
 	if len(roles) == 0 {
 		return signin.Tokens{}, signin.ErrRefused
 	}

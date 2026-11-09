@@ -60,6 +60,7 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 	for _, route := range []string{tenantRoute, platformRoute} {
 		scenarios = append(scenarios,
 			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{tokens: okTokens()}, nil, nil, "", http.StatusOK},
+			scenario{http.MethodPost, route, "application/json", goodBodyWithSide, &fakeSignIn{tokens: okTokens()}, nil, nil, "", http.StatusOK},
 			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: signin.ErrRefused}, nil, nil, "", http.StatusUnauthorized},
 			scenario{http.MethodPost, route, "application/json", `{"email":`, &fakeSignIn{}, nil, nil, "", http.StatusBadRequest},
 			scenario{http.MethodPost, route, "application/json", goodBody, &fakeSignIn{err: signin.ErrInvalidRequest}, nil, nil, "", http.StatusBadRequest},

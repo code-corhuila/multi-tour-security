@@ -37,7 +37,9 @@ type Request struct {
 	TenantIdentifier string
 	Email            string
 	Password         string
-	CorrelationID    string
+	// Context is the side the person works from, account.ContextCustomer or account.ContextTeam; empty asks for none.
+	Context       string
+	CorrelationID string
 }
 
 // Tokens is the answer. RefreshToken is empty for a temporary credential and for a restricted access: neither opens a
@@ -76,7 +78,7 @@ func (s *Service) signIn(ctx context.Context, r Request, platform bool) (Tokens,
 		return Tokens{}, errors.New("sign-in is not wired: every piece is needed, or the answers would tell the accounts apart")
 	}
 	email, ok := validate(r)
-	if !ok {
+	if !ok || (r.Context != "" && r.Context != account.ContextCustomer && r.Context != account.ContextTeam) {
 		return Tokens{}, ErrInvalidRequest
 	}
 	now := s.Clock()
@@ -124,10 +126,12 @@ func (s *Service) signIn(ctx context.Context, r Request, platform bool) (Tokens,
 		}
 		return Tokens{}, ErrRefused
 	}
-	roles, err := s.Accounts.RolesOf(ctx, acct.ID)
+	held, err := s.Accounts.RolesOf(ctx, acct.ID)
 	if err != nil {
 		return Tokens{}, err
 	}
+	// the credential carries the roles of one side, so the permissions of the two are never mixed (HU-SEC-008)
+	side, roles := account.ForContext(held, r.Context)
 	// an account with no role would open nothing; the platform lets in only its Administrator and an inactive tenant
 	// only its own
 	if len(roles) == 0 || (platform && !slices.Contains(roles, account.RolePlatformAdministrator)) || (inactive && !slices.Contains(roles, account.RoleTenantAdministrator)) {
@@ -167,7 +171,7 @@ func (s *Service) signIn(ctx context.Context, r Request, platform bool) (Tokens,
 	if err != nil {
 		return Tokens{}, err
 	}
-	if _, err := s.Sessions.Open(ctx, acct.ID, valueHash, now); err != nil {
+	if _, err := s.Sessions.Open(ctx, acct.ID, valueHash, side, now); err != nil {
 		return Tokens{}, err
 	}
 	out.RefreshToken = value

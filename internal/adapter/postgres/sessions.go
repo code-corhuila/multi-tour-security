@@ -23,17 +23,17 @@ func NewSessions(pool *pgxpool.Pool) *Sessions { return &Sessions{pool: pool} }
 // One statement: the session and its first value are both stored or neither, so a refused value leaves no session.
 const openSession = `
 WITH opened AS (
-    INSERT INTO security.session (identity_id, created_at, expires_at)
-    VALUES ($1::uuid, $2::timestamptz, $2::timestamptz + make_interval(secs => $3::double precision))
+    INSERT INTO security.session (identity_id, created_at, expires_at, context)
+    VALUES ($1::uuid, $2::timestamptz, $2::timestamptz + make_interval(secs => $3::double precision), NULLIF($5, ''))
     RETURNING session_id, expires_at
 )
 INSERT INTO security.refresh_token (token_hash, session_id, expires_at)
 SELECT $4, session_id, expires_at FROM opened
 RETURNING session_id::text`
 
-func (r *Sessions) Open(ctx context.Context, accountID, valueHash string, now time.Time) (string, error) {
+func (r *Sessions) Open(ctx context.Context, accountID, valueHash, side string, now time.Time) (string, error) {
 	var id string
-	err := r.pool.QueryRow(ctx, openSession, accountID, now, session.Life.Seconds(), valueHash).Scan(&id)
+	err := r.pool.QueryRow(ctx, openSession, accountID, now, session.Life.Seconds(), valueHash, side).Scan(&id)
 	return id, err
 }
 
@@ -41,7 +41,7 @@ func (r *Sessions) Open(ctx context.Context, accountID, valueHash string, now ti
 // second sees it consumed, and a renewal cannot succeed on a session that a reuse is revoking at the same time
 const lockValue = `
 SELECT r.session_id::text, r.consumed_at, r.expires_at, s.identity_id::text, s.created_at, s.expires_at, s.revoked_at,
-       i.identity_status, i.sessions_revoked_from
+       i.identity_status, i.sessions_revoked_from, COALESCE(s.context, '')
 FROM security.refresh_token r
 JOIN security.session s ON s.session_id = r.session_id
 JOIN security.identity i ON i.identity_id = s.identity_id
@@ -55,11 +55,11 @@ func (r *Sessions) Rotate(ctx context.Context, oldHash, newHash string, now time
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var sessionID, accountID, status string
+	var sessionID, accountID, status, side string
 	var consumed, revoked, cutoff *time.Time
 	var valueExpires, created, sessionExpires time.Time
 	err = tx.QueryRow(ctx, lockValue, oldHash).Scan(&sessionID, &consumed, &valueExpires, &accountID, &created, &sessionExpires,
-		&revoked, &status, &cutoff)
+		&revoked, &status, &cutoff, &side)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return port.Renewed{}, port.ErrRefreshInvalid
 	}
@@ -91,7 +91,7 @@ func (r *Sessions) Rotate(ctx context.Context, oldHash, newHash string, now time
 	if err := tx.Commit(ctx); err != nil {
 		return port.Renewed{}, err
 	}
-	return port.Renewed{AccountID: accountID, SessionID: sessionID}, nil
+	return port.Renewed{AccountID: accountID, SessionID: sessionID, Context: side}, nil
 }
 
 // One statement: the cutoff and its event are both written or neither. GREATEST keeps a cutoff from moving backwards.

@@ -35,7 +35,7 @@ func value(t *testing.T) (string, string) {
 func open(t *testing.T, s *postgres.Sessions, account string, at time.Time) (id, plain, hash string) {
 	t.Helper()
 	plain, hash = value(t)
-	id, err := s.Open(ctx, account, hash, at)
+	id, err := s.Open(ctx, account, hash, "", at)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestI_ARenewalThatCannotStoreItsNextValueLeavesTheOldOneAlive(t *testing.T)
 	sessions, pool, account := sessionsSetup(t)
 	_, _, hash := open(t, sessions, account, base)
 	_, taken := value(t)
-	if _, err := sessions.Open(ctx, account, taken, base); err != nil {
+	if _, err := sessions.Open(ctx, account, taken, "", base); err != nil {
 		t.Fatal(err)
 	}
 	for name, next := range map[string]string{"not a hash": "short", "the old hash": hash, "a hash already stored": taken} {
@@ -374,13 +374,38 @@ func TestI_TheTablesRefuseAValueThatIsNotAHashAndASessionForAMissingAccount(t *t
 		}
 		return "not a PostgreSQL error: " + errString(err)
 	}
-	if _, err := sessions.Open(ctx, account, "a-clear-value", base); code(err) != "23514" {
+	if _, err := sessions.Open(ctx, account, "a-clear-value", "", base); code(err) != "23514" {
 		t.Errorf("a value that is not a hash must break the CHECK (23514), got %s", code(err))
 	}
 	if n := count(t, pool, `SELECT count(*) FROM security.session`); n != 0 {
 		t.Errorf("the session of a refused value must not remain: %d", n)
 	}
-	if _, err := sessions.Open(ctx, missingID, session.Hash("x"), base); code(err) != "23503" {
+	if _, err := sessions.Open(ctx, missingID, session.Hash("x"), "", base); code(err) != "23503" {
 		t.Errorf("a session for a missing account must break the foreign key (23503), got %s", code(err))
+	}
+}
+
+// The side of a session is stored when it opens and comes back with every renewal (HU-SEC-008, RN-SEC-007-06).
+func TestI_TheSideOfASessionComesBackWithEveryRenewal(t *testing.T) {
+	s, _, account := sessionsSetup(t)
+	for _, side := range []string{"TEAM", "CUSTOMER", ""} {
+		plain, hash := value(t)
+		if _, err := s.Open(ctx, account, hash, side, base); err != nil {
+			t.Fatalf("open %q: %v", side, err)
+		}
+		_, nextHash := value(t)
+		renewed, err := s.Rotate(ctx, session.Hash(plain), nextHash, base.Add(time.Minute))
+		if err != nil || renewed.Context != side {
+			t.Fatalf("%q: %v %+v", side, err, renewed)
+		}
+	}
+}
+
+func TestI_ASideThatIsNotOneOfTheTwoIsRefusedByTheDatabase(t *testing.T) {
+	s, _, account := sessionsSetup(t)
+	_, hash := value(t)
+	var pgErr *pgconn.PgError
+	if _, err := s.Open(ctx, account, hash, "ADMIN", base); !errors.As(err, &pgErr) || pgErr.Code != "23514" {
+		t.Fatalf("%v", err)
 	}
 }
