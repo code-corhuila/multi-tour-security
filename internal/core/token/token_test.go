@@ -157,3 +157,17 @@ func TestA_TheScopeOfTheTokenIsACopy(t *testing.T) {
 		t.Error("the caller changed the scope of a token that was built")
 	}
 }
+
+func TestA_TheScopeOfTheTokenHasNoBlankNorRepeatedArea(t *testing.T) {
+	ends := now.Add(time.Hour)
+	for name, scope := range map[string][]string{"blank": {""}, "spaces": {" CASH"}, "repeated": {"CASH", "CASH"}, "control": {"CA" + string(rune(7)) + "SH"}} {
+		if _, err := token.Exceptional("platform-1", "tenant-1", scope, "access-1", ends, now); !errors.Is(err, token.ErrExceptionalClaims) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	for name, args := range map[string][2]string{"person with spaces": {" platform-1", "tenant-1"}, "tenant with spaces": {"platform-1", "tenant-1 "}} {
+		if _, err := token.Exceptional(args[0], args[1], []string{"CASH"}, "access-1", ends, now); !errors.Is(err, token.ErrExceptionalClaims) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}

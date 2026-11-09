@@ -215,3 +215,32 @@ func TestC_AnOrdinaryTokenCarriesNeitherScopeNorAuthorization(t *testing.T) {
 		}
 	}
 }
+
+func TestC_OnlyTheTokenOfASupportAccessMayCarryAScopeOrAnAuthorization(t *testing.T) {
+	k := key(t)
+	for name, edit := range map[string]func(*token.Claims){
+		"a scope on an ordinary token":          func(c *token.Claims) { c.Scope = []string{"CASH"} },
+		"an authorization on an ordinary token": func(c *token.Claims) { c.AuthorizationID = "22222222-2222-4222-8222-222222222222" },
+	} {
+		c := claims()
+		edit(&c)
+		if _, err := jwtadapter.NewSigner(k).Sign(c); err == nil {
+			t.Errorf("%s was signed", name)
+		}
+	}
+	exceptional, _ := token.Exceptional("11111111-1111-4111-8111-111111111111", "tenant-1", []string{"CASH"}, "22222222-2222-4222-8222-222222222222", now.Add(time.Hour), now)
+	for name, edit := range map[string]func(*token.Claims){
+		"an access with no scope":         func(c *token.Claims) { c.Scope = nil },
+		"an access with no authorization": func(c *token.Claims) { c.AuthorizationID = "" },
+		"an access with no tenant":        func(c *token.Claims) { c.TenantID = "" },
+	} {
+		c := exceptional
+		edit(&c)
+		if _, err := jwtadapter.NewSigner(k).Sign(c); err == nil {
+			t.Errorf("%s was signed", name)
+		}
+	}
+	if _, err := jwtadapter.NewSigner(k).Sign(exceptional); err != nil {
+		t.Errorf("the token of an access: %v", err)
+	}
+}

@@ -8,21 +8,37 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// The authorization claim of the token of a support access (HU-SEC-007 part A): read as text, absent for any other token, and refused when
-// it has another type, like every claim this service reads.
-func TestC_AMalformedAuthorizationClaimIsRefusedAndAnAbsentOneIsEmpty(t *testing.T) {
+// The authorization claim of the token of a support access (HU-SEC-007 part A): the token of an access needs a tenant and the id of its
+// authorization; no other token may carry one; and a claim of another type is refused, like every claim this service reads.
+func TestC_TheAuthorizationClaimBelongsToTheTokenOfASupportAccessAndNoOther(t *testing.T) {
 	v := httpadapter.NewVerifier(&routeKey.PublicKey)
 	in := time.Now().Add(time.Hour).Unix()
-	good := sign(t, jwt.SigningMethodRS256, routeKey, jwt.MapClaims{"sub": "s", "exp": in, "authorizationId": "a-1"})
-	if got, err := v.Verify(good); err != nil || got.AuthorizationID != "a-1" {
-		t.Fatalf("%+v %v", got, err)
+	const id = "22222222-2222-4222-8222-222222222222"
+	accepted := map[string]jwt.MapClaims{
+		"an access":        {"sub": "s", "exp": in, "access": "exceptional", "tenantId": "t-1", "authorizationId": id, "scope": []string{"CASH"}},
+		"an ordinary one":  {"sub": "s", "exp": in},
+		"a restricted one": {"sub": "s", "exp": in, "access": "restricted", "tenantId": "t-1"},
 	}
-	none := sign(t, jwt.SigningMethodRS256, routeKey, jwt.MapClaims{"sub": "s", "exp": in})
-	if got, err := v.Verify(none); err != nil || got.AuthorizationID != "" {
-		t.Fatalf("%+v %v", got, err)
+	for name, body := range accepted {
+		got, err := v.Verify(sign(t, jwt.SigningMethodRS256, routeKey, body))
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+		if name == "an access" && got.AuthorizationID != id {
+			t.Errorf("the authorization was read as %q", got.AuthorizationID)
+		}
 	}
-	bad := sign(t, jwt.SigningMethodRS256, routeKey, jwt.MapClaims{"sub": "s", "exp": in, "authorizationId": 7})
-	if _, err := v.Verify(bad); err == nil {
-		t.Fatal("an authorization claim that is not text was accepted")
+	refused := map[string]jwt.MapClaims{
+		"an access with no authorization":   {"sub": "s", "exp": in, "access": "exceptional", "tenantId": "t-1"},
+		"an access with no tenant":          {"sub": "s", "exp": in, "access": "exceptional", "authorizationId": id},
+		"an access, authorization not uuid": {"sub": "s", "exp": in, "access": "exceptional", "tenantId": "t-1", "authorizationId": "a b"},
+		"an ordinary token with one":        {"sub": "s", "exp": in, "authorizationId": id},
+		"a restricted token with one":       {"sub": "s", "exp": in, "access": "restricted", "tenantId": "t-1", "authorizationId": id},
+		"not text":                          {"sub": "s", "exp": in, "access": "exceptional", "tenantId": "t-1", "authorizationId": 7},
+	}
+	for name, body := range refused {
+		if _, err := v.Verify(sign(t, jwt.SigningMethodRS256, routeKey, body)); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
 	}
 }
