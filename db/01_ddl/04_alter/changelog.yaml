@@ -175,3 +175,20 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+  - changeSet:
+      id: security-ddl-alter-011
+      author: Molina211
+      labels: "HU-SEC-007,ddl,alter"
+      comment: "Who asked for and who decided a support access (HU-SEC-007, plan D-01)."
+      changes:
+        - sqlFile:
+            path: 011_add_support_access_foreign_keys.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/011_add_support_access_foreign_keys.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
