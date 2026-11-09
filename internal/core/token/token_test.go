@@ -103,3 +103,57 @@ func TestA_AServiceTokenLastsAtMostThirtyDaysAndAtLeastOneMinute(t *testing.T) {
 		t.Fatalf("a name of 100 characters is allowed: %v", err)
 	}
 }
+
+// The token of a support access of the Platform Administrator (HU-SEC-007 part A, RN-SEC-009-05; ADR-004 D5).
+
+func TestA_TheTokenOfASupportAccessIsForOneTenantWithItsScopeAndEndsWithTheAccess(t *testing.T) {
+	ends := now.Add(4 * time.Hour)
+	c, err := token.Exceptional("platform-1", "tenant-1", []string{"CASH", "RESERVATIONS"}, "access-1", ends, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Subject != "platform-1" || c.TenantID != "tenant-1" || c.Access != "exceptional" || c.AuthorizationID != "access-1" ||
+		!reflect.DeepEqual(c.Scope, []string{"CASH", "RESERVATIONS"}) || !reflect.DeepEqual(c.Roles, []string{"PLATFORM_ADMINISTRATOR"}) ||
+		len(c.Permissions) != 0 || c.Permissions == nil || !c.ExpiresAt.Equal(ends) || !c.IssuedAt.Equal(now) || !c.NotBefore.Equal(now) ||
+		c.Issuer != token.Issuer || c.Audience != token.Audience {
+		t.Fatalf("claims = %+v", c)
+	}
+}
+
+func TestA_TheTokenOfASupportAccessNeverOutlastsTheAccessNorMoreThan24Hours(t *testing.T) {
+	for name, ends := range map[string]time.Time{
+		"already over":  now.Add(-time.Minute),
+		"this instant":  now,
+		"over 24 hours": now.Add(24*time.Hour + time.Second),
+	} {
+		if _, err := token.Exceptional("platform-1", "tenant-1", []string{"CASH"}, "access-1", ends, now); !errors.Is(err, token.ErrExceptionalLife) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+	if _, err := token.Exceptional("platform-1", "tenant-1", []string{"CASH"}, "access-1", now.Add(24*time.Hour), now); err != nil {
+		t.Errorf("exactly 24 hours: %v", err)
+	}
+}
+
+func TestA_TheTokenOfASupportAccessNeedsAPersonATenantAnAreaAndTheAuthorization(t *testing.T) {
+	ends := now.Add(time.Hour)
+	for name, args := range map[string][4]any{
+		"no person":        {"", "tenant-1", []string{"CASH"}, "access-1"},
+		"no tenant":        {"platform-1", "", []string{"CASH"}, "access-1"},
+		"no area":          {"platform-1", "tenant-1", []string{}, "access-1"},
+		"no authorization": {"platform-1", "tenant-1", []string{"CASH"}, ""},
+	} {
+		if _, err := token.Exceptional(args[0].(string), args[1].(string), args[2].([]string), args[3].(string), ends, now); !errors.Is(err, token.ErrExceptionalClaims) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}
+
+func TestA_TheScopeOfTheTokenIsACopy(t *testing.T) {
+	scope := []string{"CASH"}
+	c, _ := token.Exceptional("platform-1", "tenant-1", scope, "access-1", now.Add(time.Hour), now)
+	scope[0] = "CUSTOMERS"
+	if c.Scope[0] != "CASH" {
+		t.Error("the caller changed the scope of a token that was built")
+	}
+}
