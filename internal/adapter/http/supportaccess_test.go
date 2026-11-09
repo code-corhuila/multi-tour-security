@@ -53,7 +53,7 @@ func platformAdminToken(t *testing.T) string {
 }
 
 func askedAccess() supportaccess.Access {
-	a, _ := supportaccess.New("3f2b8c1e-5d4a-4f6b-9c7d-1a2b3c4d5e6f", "worker-event-relay", "The cash closing does not show the transfers", []string{"CASH", "RESERVATIONS"}, 4,
+	a, _ := supportaccess.New("3f2b8c1e-5d4a-4f6b-9c7d-1a2b3c4d5e6f", "44444444-4444-4444-8444-444444444444", "The cash closing does not show the transfers", []string{"CASH", "RESERVATIONS"}, 4,
 		time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC))
 	a.ID = "55555555-5555-4555-8555-555555555555"
 	return a
@@ -111,6 +111,7 @@ func TestC_TheSameKeyAnswers200WithTheSameRequest(t *testing.T) {
 func TestC_OnlyThePlatformAdministratorWithoutAnAccessMarkAsksOrLists(t *testing.T) {
 	tokens := map[string]string{
 		"tenant administrator":   tokenWith(t, []string{"TENANT_ADMINISTRATOR"}, "3f2b8c1e-5d4a-4f6b-9c7d-1a2b3c4d5e6f", ""),
+		"service with no role":   tokenWith(t, nil, "", ""),
 		"customer":               tokenWith(t, []string{"FINAL_CUSTOMER"}, "3f2b8c1e-5d4a-4f6b-9c7d-1a2b3c4d5e6f", ""),
 		"restricted platform":    tokenWith(t, []string{"PLATFORM_ADMINISTRATOR"}, "", "restricted"),
 		"the token of an access": tokenWith(t, []string{"PLATFORM_ADMINISTRATOR"}, "3f2b8c1e-5d4a-4f6b-9c7d-1a2b3c4d5e6f", "exceptional"),
