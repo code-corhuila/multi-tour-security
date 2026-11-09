@@ -85,11 +85,11 @@ func TestA_AServiceTokenHasNoTenantAndTheRoleService(t *testing.T) {
 	}
 }
 
-func TestA_AServiceTokenLastsAtMostThirtyDaysAndAtLeastOneMinute(t *testing.T) {
-	if _, err := token.Service("w", 30*24*time.Hour, now); err != nil {
-		t.Fatalf("30 days are allowed: %v", err)
+func TestA_AServiceTokenLastsAtMostNinetyDaysAndAtLeastOneMinute(t *testing.T) {
+	if _, err := token.Service("w", 90*24*time.Hour, now); err != nil {
+		t.Fatalf("90 days are allowed: %v", err)
 	}
-	for _, life := range []time.Duration{30*24*time.Hour + time.Second, 0, -time.Hour, 59 * time.Second} {
+	for _, life := range []time.Duration{90*24*time.Hour + time.Second, 0, -time.Hour, 59 * time.Second} {
 		if _, err := token.Service("w", life, now); !errors.Is(err, token.ErrServiceLife) {
 			t.Fatalf("life %v must be refused, got %v", life, err)
 		}
