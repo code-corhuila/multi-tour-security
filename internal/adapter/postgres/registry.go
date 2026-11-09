@@ -117,13 +117,24 @@ func (r *Registry) AddRole(ctx context.Context, a port.AddedRole, scope, key str
 	if err := requireEnabledRole(ctx, tx, port.NewAccount{TenantID: a.TenantID, Role: a.Role}); err != nil {
 		return port.Registered{}, err
 	}
+	// the lock is its own statement: the eligibility below is then read with a snapshot taken after the lock was granted, so it sees the
+	// role that a request that held the lock before this one committed (under READ COMMITTED one statement keeps the snapshot it began with)
+	var locked string
+	err = tx.QueryRow(ctx, `SELECT identity_id::text FROM security.identity WHERE identity_id = $1::uuid AND tenant_id = $2::uuid FOR UPDATE`,
+		a.AccountID, a.TenantID).Scan(&locked)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return port.Registered{}, port.ErrEmailTaken
+	}
+	if err != nil {
+		return port.Registered{}, err
+	}
 	var membership string
 	err = tx.QueryRow(ctx, `
 		SELECT m.membership_id::text FROM security.identity i JOIN security.membership m USING (identity_id)
-		WHERE i.identity_id = $1::uuid AND i.tenant_id = $2::uuid AND i.identity_status = 'ACTIVE' AND m.membership_status = 'ACTIVE'
+		WHERE i.identity_id = $1::uuid AND i.identity_status = 'ACTIVE' AND m.membership_status = 'ACTIVE'
 		  AND EXISTS (SELECT 1 FROM security.membership_role c WHERE c.membership_id = m.membership_id AND c.role = 'FINAL_CUSTOMER')
-		  AND NOT EXISTS (SELECT 1 FROM security.membership_role o WHERE o.membership_id = m.membership_id AND o.role <> 'FINAL_CUSTOMER')
-		FOR UPDATE OF i`, a.AccountID, a.TenantID).Scan(&membership)
+		  AND NOT EXISTS (SELECT 1 FROM security.membership_role o WHERE o.membership_id = m.membership_id AND o.role <> 'FINAL_CUSTOMER')`,
+		a.AccountID).Scan(&membership)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return port.Registered{}, port.ErrEmailTaken
 	}

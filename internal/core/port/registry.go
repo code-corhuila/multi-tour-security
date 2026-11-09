@@ -38,7 +38,6 @@ type AddedRole struct {
 	TenantID  string
 	AccountID string
 	Role      string
-	CreatedBy string
 }
 
 // Registered is an account as the store keeps it, with the data the answer of a creation shows. The adapter that

@@ -116,7 +116,7 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 		if err != nil {
 			return port.Registered{}, false, err
 		}
-		return s.whenTaken(ctx, c, r, existing, scope)
+		return s.whenTaken(ctx, c, existing, scope)
 	}
 	// the hash is the expensive step, so it comes after every refusal that costs nothing
 	hash, err := s.Hasher.Hash(c.Password)

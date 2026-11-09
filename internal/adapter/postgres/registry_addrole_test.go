@@ -14,7 +14,7 @@ import (
 const userScope = "user:" + tenant
 
 func added(account, role string) port.AddedRole {
-	return port.AddedRole{TenantID: tenant, AccountID: account, Role: role, CreatedBy: "tenant-administrator/abc"}
+	return port.AddedRole{TenantID: tenant, AccountID: account, Role: role}
 }
 
 func TestI_TheRoleIsAddedToTheCustomerAccountAndNothingElseIsWritten(t *testing.T) {

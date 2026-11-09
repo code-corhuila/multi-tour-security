@@ -79,7 +79,7 @@ func TestA_AnEmailOfACustomerGetsTheInternalRole(t *testing.T) {
 	if err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
-	want := port.AddedRole{TenantID: tenantID, AccountID: existingID, Role: "OPERATIONAL_COLLABORATOR", CreatedBy: "tenant-administrator/" + actorAdmin}
+	want := port.AddedRole{TenantID: tenantID, AccountID: existingID, Role: "OPERATIONAL_COLLABORATOR"}
 	if len(w.registry.added) != 1 || w.registry.added[0] != want {
 		t.Fatalf("added = %+v", w.registry.added)
 	}
