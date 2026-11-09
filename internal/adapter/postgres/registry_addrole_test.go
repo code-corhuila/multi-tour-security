@@ -83,3 +83,37 @@ func TestI_AnOptionalRoleTheTenantHasNotEnabledIsRefused(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// Two requests with different keys for one customer never leave two internal roles on the account: the second finds it staff already.
+func TestI_TwoRolesAtOnceForOneCustomerLeaveOneAndTheLoserIsRefused(t *testing.T) {
+	registry, pool := registrySetup(t)
+	for round := 0; round < 15; round++ {
+		id := pgtest.MustAccount(t, pool, tenant, "luis"+string(rune('a'+round))+"@example.com", "FINAL_CUSTOMER")
+		roles := []string{"OPERATIONAL_COLLABORATOR", "TENANT_ADMINISTRATOR"}
+		errs := make(chan error, 2)
+		for i, role := range roles {
+			go func() {
+				_, err := registry.AddRole(ctx, added(id, role), userScope, "key-"+string(rune('a'+round))+string(rune('0'+i))+"-abcd")
+				errs <- err
+			}()
+		}
+		var won, lost int
+		for range roles {
+			if err := <-errs; err == nil {
+				won++
+			} else if errors.Is(err, port.ErrEmailTaken) {
+				lost++
+			} else {
+				t.Fatalf("round %d: %v", round, err)
+			}
+		}
+		var held int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM security.membership_role r JOIN security.membership m USING (membership_id)
+			WHERE m.identity_id = $1::uuid AND r.role <> 'FINAL_CUSTOMER'`, id).Scan(&held); err != nil {
+			t.Fatal(err)
+		}
+		if won != 1 || lost != 1 || held != 1 {
+			t.Fatalf("round %d: won %d lost %d internal roles held %d", round, won, lost, held)
+		}
+	}
+}
