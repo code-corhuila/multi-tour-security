@@ -62,8 +62,7 @@ type Service struct {
 var errNotWired = errors.New("support decisions are not wired: every piece is needed")
 
 // List shows the requests of the tenant. A pending request nobody decided in time is marked first, and every one that ran out is shown as
-// expired. An approval whose hours ended is written as expired later, with the fact that closes an access that was opened (task SEC9-05,
-// plan D-05); until then a filter by APPROVED can return it shown as expired.
+// expired. An approval whose hours ended is written as expired here too, with the fact that closes an access that was opened (plan D-05).
 func (s *Service) List(ctx context.Context, q Query) (Page, error) {
 	if s.Store == nil || s.Clock == nil {
 		return Page{}, errNotWired
@@ -80,6 +79,9 @@ func (s *Service) List(ctx context.Context, q Query) (Page, error) {
 		return Page{}, &FieldError{Field: "page"}
 	}
 	now := s.Clock()
+	if err := s.Store.ExpireApproved(ctx, "", q.TenantID, now); err != nil {
+		return Page{}, err
+	}
 	if err := s.Store.ExpirePendingOfTenant(ctx, q.TenantID, now); err != nil {
 		return Page{}, err
 	}

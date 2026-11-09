@@ -24,16 +24,17 @@ const (
 var now = time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
 
 type fakeStore struct {
-	items      map[string]supportaccess.Access
-	decided    []supportaccess.Access
-	lost       bool // Decide answers that the request is not pending any more
-	err        error
-	expiredFor []string
-	listed     []string
-	statuses   []string
-	limit      int
-	skip       int
-	lookups    int
+	items           map[string]supportaccess.Access
+	decided         []supportaccess.Access
+	lost            bool // Decide answers that the request is not pending any more
+	err             error
+	expiredFor      []string
+	approvedExpired []string // the author and the tenant of each expiry of approved accesses
+	listed          []string
+	statuses        []string
+	limit           int
+	skip            int
+	lookups         int
 }
 
 func (f *fakeStore) Create(context.Context, supportaccess.Access, string) (supportaccess.Access, bool, error) {
@@ -47,6 +48,11 @@ func (f *fakeStore) ListByRequester(context.Context, string, string, int, int) (
 }
 func (f *fakeStore) ExpirePending(context.Context, string, time.Time) error {
 	return errors.New("not used by the decision")
+}
+
+func (f *fakeStore) ExpireApproved(_ context.Context, requestedBy, tenant string, _ time.Time) error {
+	f.approvedExpired = append(f.approvedExpired, requestedBy+"|"+tenant)
+	return f.err
 }
 
 func (f *fakeStore) FindForTenant(_ context.Context, tenant, id string) (supportaccess.Access, bool, error) {
@@ -230,6 +236,9 @@ func TestA_TheListIsOfTheTenantAndShowsWhatRanOutAsExpired(t *testing.T) {
 	page, err := w.service.List(ctx, supportdecision.Query{TenantID: tenantID, Page: 1, Limit: 20})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(w.store.approvedExpired) != 1 || w.store.approvedExpired[0] != "|"+tenantID {
+		t.Fatalf("approved accesses expired for %v", w.store.approvedExpired)
 	}
 	if len(w.store.expiredFor) != 1 || w.store.expiredFor[0] != tenantID || len(w.store.listed) != 1 || w.store.listed[0] != tenantID {
 		t.Fatalf("expired for %v, listed for %v", w.store.expiredFor, w.store.listed)
