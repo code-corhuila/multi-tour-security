@@ -31,6 +31,7 @@ func WithSignIn(service SignInService) Option {
 type signInBody struct {
 	Email    *string `json:"email"`
 	Password *string `json:"password"`
+	Context  *string `json:"context"`
 }
 
 type sessionBody struct {
@@ -61,7 +62,7 @@ func (s *server) signInWith(w http.ResponseWriter, r *http.Request, identifier s
 		return
 	}
 	tokens, err := call(r.Context(), signin.Request{
-		TenantIdentifier: identifier, Email: *body.Email, Password: *body.Password, CorrelationID: traceID(r.Context()),
+		TenantIdentifier: identifier, Email: *body.Email, Password: *body.Password, Context: deref(body.Context), CorrelationID: traceID(r.Context()),
 	})
 	s.answerTokens(w, r, tokens, err, "sign-in")
 }
@@ -155,4 +156,11 @@ func (s *server) renew(w http.ResponseWriter, r *http.Request) {
 	}
 	tokens, err := s.refresh.Renew(r.Context(), *body.RefreshToken)
 	s.answerTokens(w, r, tokens, err, "renewal")
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
