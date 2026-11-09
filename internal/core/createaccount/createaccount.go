@@ -58,8 +58,10 @@ type Service struct {
 	Tenants  port.Tenants
 	Accounts port.Accounts
 	Registry port.AccountRegistry
-	Hasher   port.Hasher
-	Clock    func() time.Time
+	// Held lists the roles of an account whatever their status; when nil, the roles that are active now stand for them.
+	Held   port.RolesHeld
+	Hasher port.Hasher
+	Clock  func() time.Time
 	// Verifications, Mailer and Random are needed to create a customer account, which waits for its e-mail to be verified.
 	Verifications port.Verifications
 	Mailer        port.Mailer
