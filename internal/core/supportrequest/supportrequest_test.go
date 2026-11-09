@@ -44,7 +44,8 @@ type fakeStore struct {
 	err       error
 	listed    []string // the requester of each listing
 	statuses  []string
-	expired   int
+	expired   []string // the requester of each expiry
+	expireErr error
 	listLimit int
 	listSkip  int
 }
@@ -70,9 +71,14 @@ func (f *fakeStore) ListByRequester(_ context.Context, requestedBy, status strin
 	return f.list, len(f.list), f.err
 }
 
-func (f *fakeStore) ExpirePending(_ context.Context, _ time.Time) error {
-	f.expired++
-	return nil
+func (f *fakeStore) FindByKey(_ context.Context, requestedBy, key string) (supportaccess.Access, bool, error) {
+	a, ok := f.keys[requestedBy+"|"+key]
+	return a, ok, f.err
+}
+
+func (f *fakeStore) ExpirePending(_ context.Context, requestedBy string, _ time.Time) error {
+	f.expired = append(f.expired, requestedBy)
+	return f.expireErr
 }
 
 type world struct {
@@ -213,7 +219,7 @@ func TestA_TheListIsOfTheCallerOnlyAndShowsWhatRanOutAsExpired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(w.store.listed) != 1 || w.store.listed[0] != platform || w.store.expired != 1 {
+	if len(w.store.listed) != 1 || w.store.listed[0] != platform || len(w.store.expired) != 1 || w.store.expired[0] != platform {
 		t.Fatalf("listed=%v expired=%d", w.store.listed, w.store.expired)
 	}
 	if len(page.Data) != 1 || page.Data[0].Status != supportaccess.Expired || page.Total != 1 || page.TotalPages != 1 {
@@ -253,5 +259,38 @@ func TestA_NothingRunsWithoutItsPieces(t *testing.T) {
 	}
 	if _, err := (&supportrequest.Service{}).List(ctx, supportrequest.Query{ActorID: platform, Page: 1, Limit: 20}); err == nil || fieldOf2(err) {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// A repeat of the key answers the request that key made, without looking at the body or at the tenant again (Annex C).
+func TestA_ARepeatOfTheKeyAnswersTheStoredRequestEvenIfTheBodyOrTheTenantChanged(t *testing.T) {
+	w := newWorld()
+	first, _, err := w.service.Ask(ctx, command())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.tenants.copies[tenantID] = tenant.Copy{TenantID: tenantID, Status: tenant.Failed}
+	changed := command()
+	changed.Reason, changed.Hours, changed.Areas = " ", 99, nil
+	again, created, err := w.service.Ask(ctx, changed)
+	if err != nil || created || again.ID != first.ID {
+		t.Fatalf("created=%v err=%v again=%+v", created, err, again)
+	}
+	// another author with the same key is not a repeat
+	other := command()
+	other.ActorID = "88888888-8888-4888-8888-888888888888"
+	if _, created, err := w.service.Ask(ctx, other); err == nil && created {
+		t.Fatal("a request of another author was taken for a repeat, or the tenant check was skipped")
+	}
+}
+
+func TestA_AFailureToMarkTheExpiredRequestsIsAFailureOfTheList(t *testing.T) {
+	w := newWorld()
+	w.store.expireErr = errors.New("db down")
+	if _, err := w.service.List(ctx, supportrequest.Query{ActorID: platform, Page: 1, Limit: 20}); err == nil || fieldOf2(err) {
+		t.Fatalf("err = %v", err)
+	}
+	if len(w.store.listed) != 0 {
+		t.Fatal("the list was read after the failure")
 	}
 }

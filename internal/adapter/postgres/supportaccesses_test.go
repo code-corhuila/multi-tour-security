@@ -65,19 +65,62 @@ func TestI_TheSameKeyOfTheSameAuthorReturnsTheSameRequestAndStoresNoSecondOne(t 
 
 func TestI_TwoRequestsWithOneKeyAtOnceStoreOneAndBothGetIt(t *testing.T) {
 	store, pool, root := supportSetup(t)
+	request := asked(t, root, base)
+	start := make(chan struct{})
 	ids := make(chan string, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			got, _, err := store.Create(ctx, asked(t, root, base), "ask-0001-abcd")
+			<-start
+			got, _, err := store.Create(ctx, request, "ask-0001-abcd")
 			if err != nil {
-				t.Errorf("Create: %v", err)
+				got.ID = "error: " + err.Error()
 			}
 			ids <- got.ID
 		}()
 	}
+	close(start)
 	a, b := <-ids, <-ids
-	if a == "" || a != b || rows(t, pool, "support_access") != 1 {
+	if len(a) != 36 || a != b || rows(t, pool, "support_access") != 1 {
 		t.Fatalf("ids %q %q, rows %d", a, b, rows(t, pool, "support_access"))
+	}
+}
+
+func TestI_TheRequestOfAKeyIsFoundByItsAuthorAndKeyOnly(t *testing.T) {
+	store, pool, root := supportSetup(t)
+	made, _, err := store.Create(ctx, asked(t, root, base), "ask-0001-abcd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found, ok, err := store.FindByKey(ctx, root, "ask-0001-abcd")
+	if err != nil || !ok || found.ID != made.ID {
+		t.Fatalf("found=%v ok=%v err=%v", found.ID, ok, err)
+	}
+	other := pgtest.MustAccount(t, pool, "", "second-root@multitour.example", "PLATFORM_ADMINISTRATOR")
+	if _, ok, err := store.FindByKey(ctx, other, "ask-0001-abcd"); err != nil || ok {
+		t.Fatalf("another author found it: ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := store.FindByKey(ctx, root, "ask-0002-abcd"); err != nil || ok {
+		t.Fatalf("another key found it: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestI_ExpiringThePendingOnesOfOneAuthorLeavesTheOthersAlone(t *testing.T) {
+	store, pool, root := supportSetup(t)
+	other := pgtest.MustAccount(t, pool, "", "second-root@multitour.example", "PLATFORM_ADMINISTRATOR")
+	mine, _, _ := store.Create(ctx, asked(t, root, base), "ask-0001-abcd")
+	theirs, _, _ := store.Create(ctx, asked(t, other, base), "ask-0001-abcd")
+	if err := store.ExpirePending(ctx, root, base.Add(100*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	status := func(id string) string {
+		var s string
+		if err := pool.QueryRow(ctx, `SELECT status FROM security.support_access WHERE support_access_id = $1::uuid`, id).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if status(mine.ID) != "EXPIRED" || status(theirs.ID) != "PENDING" {
+		t.Fatalf("mine %s theirs %s", status(mine.ID), status(theirs.ID))
 	}
 }
 
@@ -148,7 +191,7 @@ func TestI_OnlyThePendingRequestsPast72HoursAreMarkedExpired(t *testing.T) {
 		approved.ID, base.Add(time.Hour), base.Add(5*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ExpirePending(ctx, base.Add(72*time.Hour)); err != nil {
+	if err := store.ExpirePending(ctx, root, base.Add(72*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	status := func(id string) string {
@@ -162,7 +205,7 @@ func TestI_OnlyThePendingRequestsPast72HoursAreMarkedExpired(t *testing.T) {
 		t.Fatalf("old %s young %s approved %s", status(old.ID), status(young.ID), status(approved.ID))
 	}
 	// again changes nothing
-	if err := store.ExpirePending(ctx, base.Add(72*time.Hour)); err != nil {
+	if err := store.ExpirePending(ctx, root, base.Add(72*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 }
