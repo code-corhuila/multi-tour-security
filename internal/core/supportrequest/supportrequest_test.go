@@ -46,6 +46,7 @@ type fakeStore struct {
 	statuses  []string
 	expired   []string // the requester of each expiry
 	expireErr error
+	lookups   int // the times a key was looked up
 	listLimit int
 	listSkip  int
 }
@@ -72,6 +73,7 @@ func (f *fakeStore) ListByRequester(_ context.Context, requestedBy, status strin
 }
 
 func (f *fakeStore) FindByKey(_ context.Context, requestedBy, key string) (supportaccess.Access, bool, error) {
+	f.lookups++
 	a, ok := f.keys[requestedBy+"|"+key]
 	return a, ok, f.err
 }
@@ -141,6 +143,20 @@ func TestA_ARequestNeedsAReasonAnAreaAndAtMost24Hours(t *testing.T) {
 		}
 		if len(w.store.created) != 0 {
 			t.Errorf("%s: a refused request was stored", name)
+		}
+	}
+	// the actor and the key are judged before the store is asked for anything
+	for name, edit := range map[string]func(*supportrequest.Command){
+		"short key": func(c *supportrequest.Command) { c.IdempotencyKey = "short" },
+		"long key":  func(c *supportrequest.Command) { c.IdempotencyKey = strings.Repeat("k", 129) },
+		"bad actor": func(c *supportrequest.Command) { c.ActorID = "x" },
+	} {
+		w := newWorld()
+		cmd := command()
+		edit(&cmd)
+		_, _, _ = w.service.Ask(ctx, cmd)
+		if w.store.lookups != 0 {
+			t.Errorf("%s: the store was asked for a key before the actor and the key were judged", name)
 		}
 	}
 }
@@ -276,11 +292,36 @@ func TestA_ARepeatOfTheKeyAnswersTheStoredRequestEvenIfTheBodyOrTheTenantChanged
 	if err != nil || created || again.ID != first.ID {
 		t.Fatalf("created=%v err=%v again=%+v", created, err, again)
 	}
-	// another author with the same key is not a repeat
+}
+
+// A key belongs to its author: another author with the same key makes a request of their own.
+func TestA_AKeyOfAnotherAuthorIsNotARepeat(t *testing.T) {
+	w := newWorld()
+	first, _, err := w.service.Ask(ctx, command())
+	if err != nil {
+		t.Fatal(err)
+	}
 	other := command()
 	other.ActorID = "88888888-8888-4888-8888-888888888888"
-	if _, created, err := w.service.Ask(ctx, other); err == nil && created {
-		t.Fatal("a request of another author was taken for a repeat, or the tenant check was skipped")
+	got, created, err := w.service.Ask(ctx, other)
+	if err != nil || !created || got.RequestedBy != other.ActorID {
+		t.Fatalf("created=%v err=%v got=%+v", created, err, got)
+	}
+	if got.RequestedBy == first.RequestedBy || len(w.store.created) != 2 {
+		t.Fatalf("stored %d", len(w.store.created))
+	}
+}
+
+// The repeat shows the request as it stands now: one nobody decided in 72 hours is expired, as the list shows it.
+func TestA_ARepeatOfTheKeyShowsTheRequestAsItStandsNow(t *testing.T) {
+	w := newWorld()
+	if _, _, err := w.service.Ask(ctx, command()); err != nil {
+		t.Fatal(err)
+	}
+	w.service.Clock = func() time.Time { return now.Add(73 * time.Hour) }
+	again, created, err := w.service.Ask(ctx, command())
+	if err != nil || created || again.Status != supportaccess.Expired {
+		t.Fatalf("created=%v err=%v status=%s", created, err, again.Status)
 	}
 }
 
