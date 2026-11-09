@@ -27,6 +27,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/recoverpassword"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
 	"github.com/code-corhuila/multi-tour-security/internal/core/supportaccess"
+	"github.com/code-corhuila/multi-tour-security/internal/core/supportdecision"
 	"github.com/code-corhuila/multi-tour-security/internal/core/supportrequest"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenantevent"
 	"github.com/code-corhuila/multi-tour-security/internal/core/verifyemail"
@@ -497,6 +498,40 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		{http.MethodGet, "", "", "", platformAdmin, &fakeSupport{err: errors.New("boom")}, http.StatusInternalServerError},
 	} {
 		run(supportHandler(c.svc, io.Discard), c.method, supportRoute+c.query, c.contentType, c.body, c.token, c.want)
+	}
+
+	// the Tenant Administrator lists and decides the support requests of the tenant (HU-SEC-007 part A)
+	tenantSupportAdmin := adminOfTenant(t)
+	bigDecision := `{"reason":"` + strings.Repeat("r", 4200) + `"}`
+	decisionPage := supportdecision.Page{Data: []supportaccess.Access{askedAccess()}, Page: 1, Limit: 20, Total: 1, TotalPages: 1}
+	approvalPath, rejectionPath := decisionsRoute+"/"+requestID+"/approval", decisionsRoute+"/"+requestID+"/rejection"
+	for _, c := range []struct {
+		method, path, contentType, body, token string
+		svc                                    *fakeDecider
+		want                                   int
+	}{
+		{http.MethodGet, decisionsRoute, "", "", tenantSupportAdmin, &fakeDecider{page: decisionPage}, http.StatusOK},
+		{http.MethodGet, decisionsRoute + "?limit=500", "", "", tenantSupportAdmin, &fakeDecider{err: &supportdecision.FieldError{Field: "limit"}}, http.StatusBadRequest},
+		{http.MethodGet, decisionsRoute, "", "", "", &fakeDecider{}, http.StatusUnauthorized},
+		{http.MethodGet, decisionsRoute, "", "", platformAdminToken(t), &fakeDecider{}, http.StatusForbidden},
+		{http.MethodGet, decisionsRoute, "", "", tenantSupportAdmin, &fakeDecider{err: errors.New("boom")}, http.StatusInternalServerError},
+		{http.MethodPost, approvalPath, "", "", tenantSupportAdmin, &fakeDecider{access: approvedAccess()}, http.StatusOK},
+		{http.MethodPost, approvalPath, "", "", "", &fakeDecider{}, http.StatusUnauthorized},
+		{http.MethodPost, approvalPath, "", "", platformAdminToken(t), &fakeDecider{}, http.StatusForbidden},
+		{http.MethodPost, approvalPath, "", "", tenantSupportAdmin, &fakeDecider{err: supportdecision.ErrNotFound}, http.StatusNotFound},
+		{http.MethodPost, approvalPath, "", "", tenantSupportAdmin, &fakeDecider{err: supportaccess.ErrInvalidTransition}, http.StatusUnprocessableEntity},
+		{http.MethodPost, approvalPath, "", "", tenantSupportAdmin, &fakeDecider{err: errors.New("boom")}, http.StatusInternalServerError},
+		{http.MethodPost, rejectionPath, "application/json", `{"reason":"no"}`, tenantSupportAdmin, &fakeDecider{access: approvedAccess()}, http.StatusOK},
+		{http.MethodPost, rejectionPath, "application/json", `{"reason":`, tenantSupportAdmin, &fakeDecider{}, http.StatusBadRequest},
+		{http.MethodPost, rejectionPath, "application/json", `{"reason":"no"}`, "", &fakeDecider{}, http.StatusUnauthorized},
+		{http.MethodPost, rejectionPath, "application/json", `{"reason":"no"}`, platformAdminToken(t), &fakeDecider{}, http.StatusForbidden},
+		{http.MethodPost, rejectionPath, "application/json", `{"reason":"no"}`, tenantSupportAdmin, &fakeDecider{err: supportdecision.ErrNotFound}, http.StatusNotFound},
+		{http.MethodPost, rejectionPath, "application/json", bigDecision, tenantSupportAdmin, &fakeDecider{}, http.StatusRequestEntityTooLarge},
+		{http.MethodPost, rejectionPath, "text/plain", `{"reason":"no"}`, tenantSupportAdmin, &fakeDecider{}, http.StatusUnsupportedMediaType},
+		{http.MethodPost, rejectionPath, "application/json", `{"reason":"no"}`, tenantSupportAdmin, &fakeDecider{err: supportaccess.ErrInvalidTransition}, http.StatusUnprocessableEntity},
+		{http.MethodPost, rejectionPath, "application/json", `{"reason":"no"}`, tenantSupportAdmin, &fakeDecider{err: errors.New("boom")}, http.StatusInternalServerError},
+	} {
+		run(decisionHandler(c.svc, io.Discard), c.method, c.path, c.contentType, c.body, c.token, c.want)
 	}
 
 	for path, item := range doc.Paths.Map() {
