@@ -48,6 +48,10 @@ func TestI_TheResetFactCarriesTheEmailAndTheTenantName(t *testing.T) {
 
 func TestI_ATenantWithoutACommercialNameShowsMultitour(t *testing.T) {
 	w := recoverySetup(t)
+	// the copy exists and has no commercial name, which is not the same as having no copy
+	if _, err := w.pool.Exec(ctx, `INSERT INTO security.tenant_copy (tenant_id, identifier, status, occurred_at) VALUES ($1::uuid, 'travesia', 'ACTIVE', now())`, tenant); err != nil {
+		t.Fatal(err)
+	}
 	w.issue(t, w.boss, tenant, 1, base)
 	at := base.Add(5 * time.Minute)
 	w.reset(t, w.boss, w.live(t, w.boss, at).ID, false, true, at)
@@ -105,5 +109,18 @@ func TestI_TheResetFactsCarryNoCredential(t *testing.T) {
 				t.Errorf("%s has a field named %s: %s", kind, field, raw)
 			}
 		}
+	}
+}
+
+// The roles of the failed fact are those of the active membership, as RolesHeld reads them.
+func TestI_TheFailedResetFactListsNoRoleOfAMembershipThatIsNotActive(t *testing.T) {
+	w := recoverySetup(t)
+	w.issue(t, w.boss, tenant, 1, base)
+	if _, err := w.pool.Exec(ctx, `UPDATE security.membership SET membership_status = 'INACTIVE' WHERE identity_id = $1::uuid`, w.boss); err != nil {
+		t.Fatal(err)
+	}
+	w.fail(t, w.boss, w.live(t, w.boss, base).ID, port.ReasonWrongCode, true, base)
+	if roles, _ := w.payload(t, "PasswordResetFailed")["roles"].([]any); len(roles) != 0 {
+		t.Fatalf("roles = %v", roles)
 	}
 }
