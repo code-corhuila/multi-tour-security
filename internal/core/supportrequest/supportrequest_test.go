@@ -220,7 +220,7 @@ func TestA_TheListIsOfTheCallerOnlyAndShowsWhatRanOutAsExpired(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(w.store.listed) != 1 || w.store.listed[0] != platform || len(w.store.expired) != 1 || w.store.expired[0] != platform {
-		t.Fatalf("listed=%v expired=%d", w.store.listed, w.store.expired)
+		t.Fatalf("listed=%v expired=%v", w.store.listed, w.store.expired)
 	}
 	if len(page.Data) != 1 || page.Data[0].Status != supportaccess.Expired || page.Total != 1 || page.TotalPages != 1 {
 		t.Fatalf("page = %+v", page)

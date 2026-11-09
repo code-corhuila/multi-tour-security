@@ -60,8 +60,17 @@ func (s *SupportAccesses) Create(ctx context.Context, a supportaccess.Access, ke
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return supportaccess.Access{}, false, err
 	}
-	prior, err := scanAccess(s.pool.QueryRow(ctx, `SELECT `+supportColumns+` FROM security.support_access WHERE requested_by = $1::uuid AND request_key = $2`, a.RequestedBy, key))
+	prior, _, err := s.FindByKey(ctx, a.RequestedBy, key)
 	return prior, false, err
+}
+
+// FindByKey returns the request that the key of that author made.
+func (s *SupportAccesses) FindByKey(ctx context.Context, requestedBy, key string) (supportaccess.Access, bool, error) {
+	a, err := scanAccess(s.pool.QueryRow(ctx, `SELECT `+supportColumns+` FROM security.support_access WHERE requested_by = $1::uuid AND request_key = $2`, requestedBy, key))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return supportaccess.Access{}, false, nil
+	}
+	return a, err == nil, err
 }
 
 // ListByRequester is one query: the page and, in each row, the total of the filter. Only the rows of that author are read.
@@ -102,10 +111,11 @@ func (s *SupportAccesses) ListByRequester(ctx context.Context, requestedBy, stat
 	return list, total, nil
 }
 
-// ExpirePending marks the requests that nobody decided within the window as expired. A request that was decided, or that is already
-// expired, is not touched, so asking twice changes nothing.
-func (s *SupportAccesses) ExpirePending(ctx context.Context, now time.Time) error {
-	_, err := s.pool.Exec(ctx, `UPDATE security.support_access SET status = 'EXPIRED' WHERE status = 'PENDING' AND requested_at + make_interval(secs => $2::double precision) <= $1::timestamptz`,
-		now, supportaccess.DecisionWindow.Seconds())
+// ExpirePending marks the requests of that author that nobody decided within the window as expired. A request that was decided, or that is
+// already expired, is not touched, so asking twice changes nothing.
+func (s *SupportAccesses) ExpirePending(ctx context.Context, requestedBy string, now time.Time) error {
+	_, err := s.pool.Exec(ctx, `UPDATE security.support_access SET status = 'EXPIRED' WHERE requested_by = $3::uuid AND status = 'PENDING'
+		AND requested_at + make_interval(secs => $2::double precision) <= $1::timestamptz`,
+		now, supportaccess.DecisionWindow.Seconds(), requestedBy)
 	return err
 }

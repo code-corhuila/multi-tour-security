@@ -85,6 +85,10 @@ func (s *Service) Ask(ctx context.Context, c Command) (supportaccess.Access, boo
 	if n := len(c.IdempotencyKey); n < minKey || n > maxKey {
 		return supportaccess.Access{}, false, &FieldError{Field: keyField}
 	}
+	// a repeat of the key is answered with the request it made, whatever the body or the tenant are now (Annex C)
+	if prior, found, err := s.Store.FindByKey(ctx, c.ActorID, c.IdempotencyKey); err != nil || found {
+		return prior, false, err
+	}
 	if !validate.UUID(c.TenantID) {
 		return supportaccess.Access{}, false, &FieldError{Field: tenantField}
 	}
@@ -128,7 +132,7 @@ func (s *Service) List(ctx context.Context, q Query) (Page, error) {
 		return Page{}, &FieldError{Field: pageField}
 	}
 	now := s.Clock()
-	if err := s.Store.ExpirePending(ctx, now); err != nil {
+	if err := s.Store.ExpirePending(ctx, q.ActorID, now); err != nil {
 		return Page{}, err
 	}
 	found, total, err := s.Store.ListByRequester(ctx, q.ActorID, q.Status, q.Limit, (q.Page-1)*q.Limit)
