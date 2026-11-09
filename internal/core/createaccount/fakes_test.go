@@ -61,6 +61,11 @@ func (f *fakeAccounts) RolesOf(_ context.Context, id string) ([]string, error) {
 	return f.roles[id], f.err
 }
 
+// fakeHeld answers the roles of an account whatever their status, as the store does for the e-mail that is taken.
+type fakeHeld struct{ roles map[string][]string }
+
+func (f *fakeHeld) RolesHeld(_ context.Context, id string) ([]string, error) { return f.roles[id], nil }
+
 type fakeRegistry struct {
 	keys     map[string]port.Registered // scope + "|" + key
 	created  []port.NewAccount
