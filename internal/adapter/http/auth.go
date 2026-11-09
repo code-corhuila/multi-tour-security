@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	coretoken "github.com/code-corhuila/multi-tour-security/internal/core/token"
 )
 
 // tokenLeeway is the clock tolerance of ADR-004 D10.
@@ -78,6 +80,11 @@ func (v *Verifier) Verify(raw string) (Claims, error) {
 		return Claims{}, errMalformedClaim
 	}
 	if claims.AuthorizationID, ok = textClaim(body, "authorizationId"); !ok {
+		return Claims{}, errMalformedClaim
+	}
+	// the token of a support access has a tenant and the id of its authorization; no other token has one (ADR-004 D5)
+	exceptional := claims.Access == coretoken.ExceptionalAccess
+	if exceptional != (claims.AuthorizationID != "") || (exceptional && (claims.TenantID == "" || !uuidPattern.MatchString(claims.AuthorizationID))) {
 		return Claims{}, errMalformedClaim
 	}
 	if raw, present := body["roles"]; present && raw != nil {

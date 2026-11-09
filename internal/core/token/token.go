@@ -4,6 +4,7 @@ package token
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -102,8 +103,13 @@ func Service(name string, life time.Duration, now time.Time) (Claims, error) {
 // Exceptional is the token of a support access: the Platform Administrator for one tenant, the approved areas as the scope, the id of the
 // authorization and an end equal to the end of the access, never later than 24 hours from now. It has no special permission and no renewal.
 func Exceptional(platformAdministratorID, tenantID string, scope []string, authorizationID string, ends, now time.Time) (Claims, error) {
-	if platformAdministratorID == "" || tenantID == "" || len(scope) == 0 || authorizationID == "" {
+	if !plainText(platformAdministratorID) || !plainText(tenantID) || !plainText(authorizationID) || len(scope) == 0 {
 		return Claims{}, ErrExceptionalClaims
+	}
+	for i, area := range scope {
+		if !plainText(area) || slices.Contains(scope[:i], area) {
+			return Claims{}, ErrExceptionalClaims
+		}
 	}
 	if !ends.After(now) || ends.After(now.Add(MaxExceptionalLife)) {
 		return Claims{}, ErrExceptionalLife
@@ -111,4 +117,9 @@ func Exceptional(platformAdministratorID, tenantID string, scope []string, autho
 	c := claims(platformAdministratorID, tenantID, []string{"PLATFORM_ADMINISTRATOR"}, nil, ExceptionalAccess, now, ends.Sub(now))
 	c.Scope, c.AuthorizationID = append([]string{}, scope...), authorizationID
 	return c, nil
+}
+
+// plainText is a value with something in it, no space at its ends and no control character: what the services read as a name or an id.
+func plainText(s string) bool {
+	return s != "" && s == strings.TrimSpace(s) && strings.IndexFunc(s, unicode.IsControl) < 0
 }
