@@ -39,7 +39,7 @@ func isCustomerOnly(roles []string) bool {
 	customer := false
 	for _, role := range roles {
 		switch {
-		case role == roleFinalCustomer:
+		case role == account.RoleFinalCustomer:
 			customer = true
 		case account.IsInternalRole(role):
 			return false
