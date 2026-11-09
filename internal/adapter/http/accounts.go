@@ -157,7 +157,15 @@ func toAccountBody(reg port.Registered) (accountBody, error) {
 		StatusChangedAt: changedAt, StatusChangedBy: reg.Changed.By, StatusReason: reg.Changed.Reason,
 		TemporaryCredentialUntil: until,
 		AccountID:                reg.Account.ID, TenantID: reg.Account.TenantID, FullName: reg.FullName, Email: reg.Account.EmailNormalized,
-		Phone: reg.Phone, Roles: []string{reg.Role}, Permissions: account.PermissionsFor([]string{reg.Role}, reg.Permissions), AccountStatus: status, EmailVerified: reg.EmailVerified,
+		Phone: reg.Phone, Roles: rolesOf(reg), Permissions: account.PermissionsFor(rolesOf(reg), reg.Permissions), AccountStatus: status, EmailVerified: reg.EmailVerified,
 		CreatedAt: reg.CreatedAt.UTC(),
 	}, nil
+}
+
+// rolesOf is every role of the account; a store that names only one (Role) is answered with that one.
+func rolesOf(reg port.Registered) []string {
+	if len(reg.Roles) > 0 {
+		return reg.Roles
+	}
+	return []string{reg.Role}
 }

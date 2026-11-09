@@ -113,10 +113,10 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 		return port.Registered{}, false, refuse("email", errInvalid)
 	}
 	if existing, taken, err := s.Accounts.FindByEmail(ctx, c.TenantID, email); err != nil || taken {
-		if err == nil {
-			err = s.whyTaken(ctx, c.Kind, existing)
+		if err != nil {
+			return port.Registered{}, false, err
 		}
-		return port.Registered{}, false, err
+		return s.whenTaken(ctx, c, existing, scope)
 	}
 	// the hash is the expensive step, so it comes after every refusal that costs nothing
 	hash, err := s.Hasher.Hash(c.Password)
