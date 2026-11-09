@@ -61,8 +61,9 @@ type Service struct {
 
 var errNotWired = errors.New("support decisions are not wired: every piece is needed")
 
-// List shows the requests of the tenant. A pending request nobody decided in time is marked first, and the ones that ran out are shown as
-// expired, so a filter by status agrees with what the page shows.
+// List shows the requests of the tenant. A pending request nobody decided in time is marked first, and every one that ran out is shown as
+// expired. An approval whose hours ended is written as expired later, with the fact that closes an access that was opened (task SEC9-05,
+// plan D-05); until then a filter by APPROVED can return it shown as expired.
 func (s *Service) List(ctx context.Context, q Query) (Page, error) {
 	if s.Store == nil || s.Clock == nil {
 		return Page{}, errNotWired
@@ -128,7 +129,8 @@ func (s *Service) decide(ctx context.Context, d Decision, apply func(supportacce
 	if !found {
 		return supportaccess.Access{}, ErrNotFound
 	}
-	decided, err := apply(current, s.Clock())
+	// the store keeps microseconds: the instants of the answer are cut the same way, so a later read agrees with it
+	decided, err := apply(current, s.Clock().Truncate(time.Microsecond))
 	switch {
 	case errors.Is(err, supportaccess.ErrInvalidReason):
 		return supportaccess.Access{}, &FieldError{Field: "reason"}
