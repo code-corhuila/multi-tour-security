@@ -51,5 +51,11 @@ func (s *Signer) Sign(c token.Claims) (string, error) {
 	if c.Access != "" {
 		body["access"] = c.Access
 	}
+	if len(c.Scope) > 0 {
+		body["scope"] = c.Scope
+	}
+	if c.AuthorizationID != "" {
+		body["authorizationId"] = c.AuthorizationID
+	}
 	return jwt.NewWithClaims(jwt.SigningMethodRS256, body).SignedString(s.key)
 }

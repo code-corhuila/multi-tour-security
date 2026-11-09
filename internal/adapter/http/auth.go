@@ -33,6 +33,8 @@ type Claims struct {
 	// only ("password-change", "restricted") and empty for an ordinary one.
 	TenantID string
 	Access   string
+	// AuthorizationID is the id of the support access the token was issued for; empty in any other token.
+	AuthorizationID string
 	// Roles are the roles of the token that are text; nil when the claim is absent.
 	Roles []string
 }
@@ -73,6 +75,9 @@ func (v *Verifier) Verify(raw string) (Claims, error) {
 		return Claims{}, errMalformedClaim
 	}
 	if claims.Access, ok = textClaim(body, "access"); !ok {
+		return Claims{}, errMalformedClaim
+	}
+	if claims.AuthorizationID, ok = textClaim(body, "authorizationId"); !ok {
 		return Claims{}, errMalformedClaim
 	}
 	if raw, present := body["roles"]; present && raw != nil {
