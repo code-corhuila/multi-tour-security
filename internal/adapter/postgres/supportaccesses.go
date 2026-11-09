@@ -79,40 +79,7 @@ func (s *SupportAccesses) FindByKey(ctx context.Context, requestedBy, key string
 
 // ListByRequester is one query: the page and, in each row, the total of the filter. Only the rows of that author are read.
 func (s *SupportAccesses) ListByRequester(ctx context.Context, requestedBy, status string, limit, offset int) ([]supportaccess.Access, int, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+supportColumns+`, count(*) OVER () FROM security.support_access
-		WHERE requested_by = $1::uuid AND ($2 = '' OR status = $2) ORDER BY requested_at DESC, support_access_id DESC LIMIT $3 OFFSET $4`,
-		requestedBy, status, limit, offset)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer rows.Close()
-	list, total := []supportaccess.Access{}, 0
-	for rows.Next() {
-		var a supportaccess.Access
-		var areas []string
-		var st string
-		var decidedAt, expiresAt, openedAt, closedAt *time.Time
-		if err := rows.Scan(&a.ID, &a.TenantID, &a.RequestedBy, &a.Reason, &areas, &a.Hours, &st, &a.RequestedAt,
-			&a.DecidedBy, &decidedAt, &a.DecisionReason, &expiresAt, &openedAt, &closedAt, &a.ClosedReason, &total); err != nil {
-			return nil, 0, err
-		}
-		if a.Areas, err = supportaccess.ParseAreas(areas); err != nil {
-			return nil, 0, err
-		}
-		a.Status, a.RequestedAt = supportaccess.Status(st), a.RequestedAt.UTC()
-		a.DecidedAt, a.ExpiresAt, a.OpenedAt, a.ClosedAt = utc(decidedAt), utc(expiresAt), utc(openedAt), utc(closedAt)
-		list = append(list, a)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, err
-	}
-	if len(list) == 0 && offset > 0 {
-		// a page past the end has no row to carry the total, and the caller still needs it
-		if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM security.support_access WHERE requested_by = $1::uuid AND ($2 = '' OR status = $2)`, requestedBy, status).Scan(&total); err != nil {
-			return nil, 0, err
-		}
-	}
-	return list, total, nil
+	return s.listBy(ctx, "requested_by", requestedBy, status, limit, offset)
 }
 
 // ExpirePending marks the requests of that author that nobody decided within the window as expired. A request that was decided, or that is
@@ -135,9 +102,14 @@ func (s *SupportAccesses) FindForTenant(ctx context.Context, tenantID, id string
 
 // ListByTenant is one query: the page and, in each row, the total of the filter. Only the rows of that tenant are read.
 func (s *SupportAccesses) ListByTenant(ctx context.Context, tenantID, status string, limit, offset int) ([]supportaccess.Access, int, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+supportColumns+`, count(*) OVER () FROM security.support_access
-		WHERE tenant_id = $1::uuid AND ($2 = '' OR status = $2) ORDER BY requested_at DESC, support_access_id DESC LIMIT $3 OFFSET $4`,
-		tenantID, status, limit, offset)
+	return s.listBy(ctx, "tenant_id", tenantID, status, limit, offset)
+}
+
+// listBy serves both listings. The column is one of the two constants above, never a value of a request.
+func (s *SupportAccesses) listBy(ctx context.Context, column, owner, status string, limit, offset int) ([]supportaccess.Access, int, error) {
+	filter := column + ` = $1::uuid AND ($2 = '' OR status = $2)`
+	rows, err := s.pool.Query(ctx, `SELECT `+supportColumns+`, count(*) OVER () FROM security.support_access WHERE `+filter+
+		` ORDER BY requested_at DESC, support_access_id DESC LIMIT $3 OFFSET $4`, owner, status, limit, offset)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -155,7 +127,8 @@ func (s *SupportAccesses) ListByTenant(ctx context.Context, tenantID, status str
 		return nil, 0, err
 	}
 	if len(list) == 0 && offset > 0 {
-		if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM security.support_access WHERE tenant_id = $1::uuid AND ($2 = '' OR status = $2)`, tenantID, status).Scan(&total); err != nil {
+		// a page past the end has no row to carry the total, and the caller still needs it
+		if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM security.support_access WHERE `+filter, owner, status).Scan(&total); err != nil {
 			return nil, 0, err
 		}
 	}
