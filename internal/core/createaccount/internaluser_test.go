@@ -71,16 +71,100 @@ func TestA_EmailOfAnInactiveInternalUserSaysItCanBeReactivated(t *testing.T) {
 	nothingWritten(t, w)
 }
 
-// RN-SEC-003-05: until HU-SEC-008 adds the role to the account, the e-mail of a customer is refused as such.
-func TestA_EmailOfACustomerIsRefusedUntilHuSec008(t *testing.T) {
-	for _, status := range []account.Status{account.Pending, account.Active, account.Inactive} {
-		w := newWorld()
-		takenBy(w, status, "FINAL_CUSTOMER")
-		_, _, err := w.service.Create(ctx, internalUser())
-		if got := reasonOf(t, err); got != createaccount.TakenByCustomer {
-			t.Fatalf("status %d: reason = %v", status, got)
-		}
-		nothingWritten(t, w)
+// HU-SEC-008, RN-SEC-007-01: the e-mail of an active, verified customer gets the internal role on the same account.
+func TestA_AnEmailOfACustomerGetsTheInternalRole(t *testing.T) {
+	w := newWorld()
+	takenBy(w, account.Active, "FINAL_CUSTOMER")
+	made, created, err := w.service.Create(ctx, internalUser())
+	if err != nil || !created {
+		t.Fatalf("created=%v err=%v", created, err)
+	}
+	want := port.AddedRole{TenantID: tenantID, AccountID: existingID, Role: "OPERATIONAL_COLLABORATOR", CreatedBy: "tenant-administrator/" + actorAdmin}
+	if len(w.registry.added) != 1 || w.registry.added[0] != want {
+		t.Fatalf("added = %+v", w.registry.added)
+	}
+	if made.Account.ID != existingID || made.Account.PasswordHash != "" {
+		t.Fatalf("the answer is the account of the customer, without a hash: %+v", made)
+	}
+	nothingWritten(t, w) // no account created, and the password of the form is never hashed
+}
+
+// RN-SEC-007-01: the repeat of the key answers the account already changed, and adds nothing.
+func TestA_TheRepeatOfTheKeyAnswersTheSameAccountAndAddsNothing(t *testing.T) {
+	w := newWorld()
+	takenBy(w, account.Active, "FINAL_CUSTOMER")
+	if _, _, err := w.service.Create(ctx, internalUser()); err != nil {
+		t.Fatal(err)
+	}
+	again, created, err := w.service.Create(ctx, internalUser())
+	if err != nil || created || again.Account.ID != existingID || len(w.registry.added) != 1 {
+		t.Fatalf("created=%v err=%v added=%d", created, err, len(w.registry.added))
+	}
+}
+
+// RN-SEC-007-02: a customer whose e-mail is not verified is refused, and told so.
+func TestA_APendingCustomerIsRefusedAsPending(t *testing.T) {
+	w := newWorld()
+	takenBy(w, account.Pending, "FINAL_CUSTOMER")
+	_, _, err := w.service.Create(ctx, internalUser())
+	if got := reasonOf(t, err); got != createaccount.TakenByPendingCustomer {
+		t.Fatalf("reason = %v", got)
+	}
+	nothingWritten(t, w)
+	if len(w.registry.added) != 0 {
+		t.Fatal("a pending customer got a role")
+	}
+}
+
+// An inactive customer account is not brought back by a role: it keeps its refusal.
+func TestA_AnInactiveCustomerIsRefusedAsACustomer(t *testing.T) {
+	w := newWorld()
+	takenBy(w, account.Inactive, "FINAL_CUSTOMER")
+	_, _, err := w.service.Create(ctx, internalUser())
+	if got := reasonOf(t, err); got != createaccount.TakenByCustomer {
+		t.Fatalf("reason = %v", got)
+	}
+	nothingWritten(t, w)
+	if len(w.registry.added) != 0 {
+		t.Fatal("an inactive customer got a role")
+	}
+}
+
+// A customer who already holds an internal role is an internal user: a second role is not added.
+func TestA_ACustomerWhoIsAlreadyStaffIsAnInternalUser(t *testing.T) {
+	w := newWorld()
+	takenBy(w, account.Active, "FINAL_CUSTOMER", "MANAGER")
+	_, _, err := w.service.Create(ctx, internalUser())
+	if got := reasonOf(t, err); got != createaccount.TakenByInternalUser {
+		t.Fatalf("reason = %v", got)
+	}
+	if len(w.registry.added) != 0 {
+		t.Fatal("a second internal role was added")
+	}
+}
+
+// RN-SEC-007-03: the store refuses an optional role the tenant has not enabled, and that refusal reaches the caller.
+func TestA_ARoleTheTenantHasNotEnabledIsRefusedForACustomerToo(t *testing.T) {
+	w := newWorld()
+	takenBy(w, account.Active, "FINAL_CUSTOMER")
+	w.registry.addFn = func(port.AddedRole) error { return port.ErrRoleNotEnabled }
+	c := internalUser()
+	c.Role = "ANALYST"
+	if _, _, err := w.service.Create(ctx, c); !errors.Is(err, port.ErrRoleNotEnabled) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// RN-SEC-007-10: the same e-mail in another tenant is another person; this tenant gets its own account.
+func TestA_ACustomerOfAnotherTenantIsNotTouched(t *testing.T) {
+	w := newWorld()
+	w.accounts.byKey[otherTenant+"|luis@example.com"] = account.Account{ID: "acc-other", TenantID: otherTenant, Status: account.Active}
+	w.accounts.roles["acc-other"] = []string{"FINAL_CUSTOMER"}
+	if _, created, err := w.service.Create(ctx, internalUser()); err != nil || !created {
+		t.Fatalf("created=%v err=%v", created, err)
+	}
+	if len(w.registry.added) != 0 || len(w.registry.created) != 1 {
+		t.Fatalf("added=%d created=%d", len(w.registry.added), len(w.registry.created))
 	}
 }
 
