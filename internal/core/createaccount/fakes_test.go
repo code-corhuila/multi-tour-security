@@ -64,6 +64,8 @@ func (f *fakeAccounts) RolesOf(_ context.Context, id string) ([]string, error) {
 type fakeRegistry struct {
 	keys     map[string]port.Registered // scope + "|" + key
 	created  []port.NewAccount
+	added    []port.AddedRole
+	addFn    func(a port.AddedRole) error // when set, its error is the answer of AddRole
 	scopes   []string
 	findErr  error
 	createFn func(n port.NewAccount) error // when set, its error is the answer of Create
@@ -90,6 +92,24 @@ func (f *fakeRegistry) Create(_ context.Context, n port.NewAccount, scope, key s
 		Account: account.Account{ID: "acc-new", TenantID: n.TenantID, EmailNormalized: n.EmailNormalized,
 			PasswordHash: n.PasswordHash, Status: status, TemporaryUntil: n.TemporaryUntil},
 		Role: n.Role, FullName: n.FullName, Phone: n.Phone,
+	}
+	if f.keys == nil {
+		f.keys = map[string]port.Registered{}
+	}
+	f.keys[scope+"|"+key] = r
+	return r, nil
+}
+
+func (f *fakeRegistry) AddRole(_ context.Context, a port.AddedRole, scope, key string) (port.Registered, error) {
+	if f.addFn != nil {
+		if err := f.addFn(a); err != nil {
+			return port.Registered{}, err
+		}
+	}
+	f.added = append(f.added, a)
+	r := port.Registered{
+		Account: account.Account{ID: a.AccountID, TenantID: a.TenantID, Status: account.Active},
+		Role:    a.Role, Roles: []string{"FINAL_CUSTOMER", a.Role},
 	}
 	if f.keys == nil {
 		f.keys = map[string]port.Registered{}

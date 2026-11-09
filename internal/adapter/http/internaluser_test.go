@@ -148,6 +148,7 @@ func TestC_ARefusedEmailSaysWhoseItIs(t *testing.T) {
 		createaccount.TakenByInternalUser:         "internal user",
 		createaccount.TakenByInactiveInternalUser: "reactivated",
 		createaccount.TakenByCustomer:             "customer",
+		createaccount.TakenByPendingCustomer:      "not verified",
 	}
 	seen := map[string]bool{}
 	for reason, word := range cases {
@@ -210,5 +211,20 @@ func TestC_TheBodyIsJSONAndSmall(t *testing.T) {
 	}
 	if rec := postUser(h, administrator(t), "application/json", `{"fullName":`, usersKey); rec.Code != http.StatusBadRequest {
 		t.Fatalf("malformed: %d", rec.Code)
+	}
+}
+
+// HU-SEC-008: the answer for an account with both sides names both roles.
+func TestC_TheAnswerForACustomerWhoBecameStaffNamesBothRoles(t *testing.T) {
+	reg := registeredUser()
+	reg.Roles = []string{"FINAL_CUSTOMER", "OPERATIONAL_COLLABORATOR"}
+	svc := &fakeCreator{reg: reg, created: true}
+	rec := postUser(usersHandler(svc, io.Discard), administrator(t), "application/json", userBody, usersKey)
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if roles, _ := out["roles"].([]any); len(roles) != 2 || roles[0] != "FINAL_CUSTOMER" || roles[1] != "OPERATIONAL_COLLABORATOR" {
+		t.Fatalf("the answer is %v", out)
 	}
 }
