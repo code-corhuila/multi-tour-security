@@ -14,7 +14,7 @@ import (
 // RN-SEC-007-01); every other case is the refusal that says whose the e-mail is.
 func (s *Service) whenTaken(ctx context.Context, c Command, existing account.Account, scope string) (port.Registered, bool, error) {
 	if c.Kind == InternalUser && existing.Status == account.Active {
-		roles, err := s.Accounts.RolesOf(ctx, existing.ID)
+		roles, err := s.rolesHeld(ctx, existing.ID)
 		if err != nil {
 			return port.Registered{}, false, err
 		}
@@ -46,4 +46,11 @@ func isCustomerOnly(roles []string) bool {
 		}
 	}
 	return customer
+}
+
+func (s *Service) rolesHeld(ctx context.Context, id string) ([]string, error) {
+	if s.Held != nil {
+		return s.Held.RolesHeld(ctx, id)
+	}
+	return s.Accounts.RolesOf(ctx, id)
 }

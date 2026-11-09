@@ -39,7 +39,7 @@ func (s *Service) whyTaken(ctx context.Context, kind Kind, existing account.Acco
 	if kind != InternalUser {
 		return port.ErrEmailTaken
 	}
-	roles, err := s.Accounts.RolesOf(ctx, existing.ID)
+	roles, err := s.rolesHeld(ctx, existing.ID)
 	if err != nil {
 		return err
 	}
