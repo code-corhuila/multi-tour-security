@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Multitour security
-  version: 0.11.0
+  version: 0.12.0
   description: >
     The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
     (ADR-004 D7). It carries only the operations the service implements; every story adds its operations here
@@ -1689,6 +1689,8 @@ components:
         eventVersion: {type: integer, minimum: 1}
         tenantId: {type: string, format: uuid, description: Absent for the events of the Platform Administrator}
         aggregateId: {type: string, format: uuid}
+        actorId: {type: string, format: uuid, description: 'The account that caused the event, absent when nobody did'}
+        reason: {type: string, description: 'Why it happened, when the event has one'}
         payload: {type: object}
         correlationId: {type: string}
         occurredAt: {type: string, format: date-time}
