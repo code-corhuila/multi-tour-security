@@ -302,26 +302,32 @@ func TestI_ADecisionIsStoredOnlyWhileTheRequestIsPendingSoTwoAtOnceHaveOneWinner
 		t.Fatal(err)
 	}
 	start := make(chan struct{})
-	won := make(chan bool, 2)
+	type outcome struct {
+		won bool
+		err error
+	}
+	results := make(chan outcome, 2)
 	for _, decision := range []supportaccess.Access{approve, reject} {
 		go func() {
 			<-start
 			ok, err := store.Decide(ctx, decision)
-			if err != nil {
-				won <- false
-				return
-			}
-			won <- ok
+			results <- outcome{ok, err}
 		}()
 	}
 	close(start)
-	a, b := <-won, <-won
-	if a == b {
-		t.Fatalf("both %v: one decision must win and the other must lose", a)
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil {
+		t.Fatalf("errors: %v %v", first.err, second.err)
+	}
+	if first.won == second.won {
+		t.Fatalf("both %v: one decision must win and the other must lose", first.won)
 	}
 	got, _, err := store.FindForTenant(ctx, tenant, made.ID)
 	if err != nil || (got.Status != supportaccess.Approved && got.Status != supportaccess.Rejected) {
 		t.Fatalf("status %s err %v", got.Status, err)
+	}
+	if got.Status == supportaccess.Rejected && !got.ExpiresAt.IsZero() {
+		t.Fatalf("a rejection stored an end: %v", got.ExpiresAt)
 	}
 	if got.Status == supportaccess.Approved && (got.DecidedBy != admin || !got.ExpiresAt.Equal(base.Add(5*time.Hour))) {
 		t.Fatalf("approved = %+v", got)
@@ -332,5 +338,29 @@ func TestI_ADecisionIsStoredOnlyWhileTheRequestIsPendingSoTwoAtOnceHaveOneWinner
 	// a third decision on a decided request loses
 	if ok, err := store.Decide(ctx, approve); err != nil || ok {
 		t.Fatalf("a third decision: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestI_ADecisionIsNotStoredAfterTheWindowNorForAnotherTenant(t *testing.T) {
+	store, pool, root := supportSetup(t)
+	admin := pgtest.MustAccount(t, pool, tenant, "boss@example.com", "TENANT_ADMINISTRATOR")
+	made, _, _ := store.Create(ctx, asked(t, root, base), "ask-0001-abcd")
+
+	late, err := made.Approve(admin, base.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the request waited 72 hours: the same decision, dated at the end of the window, is refused by the store
+	late.DecidedAt = base.Add(72 * time.Hour)
+	if ok, err := store.Decide(ctx, late); err != nil || ok {
+		t.Fatalf("after the window: ok=%v err=%v", ok, err)
+	}
+	foreign, _ := made.Approve(admin, base.Add(time.Hour))
+	foreign.TenantID = otherTenant
+	if ok, err := store.Decide(ctx, foreign); err != nil || ok {
+		t.Fatalf("another tenant: ok=%v err=%v", ok, err)
+	}
+	if got, _, _ := store.FindForTenant(ctx, tenant, made.ID); got.Status != supportaccess.Pending {
+		t.Fatalf("the request changed: %s", got.Status)
 	}
 }

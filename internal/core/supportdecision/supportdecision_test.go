@@ -303,3 +303,16 @@ func TestA_NothingRunsWithoutItsPieces(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// The instants of a decision are kept to the microsecond, as the store keeps them, so the answer and a later read agree.
+func TestA_TheInstantsOfADecisionAreKeptToTheMicrosecond(t *testing.T) {
+	w := newWorld(t)
+	w.service.Clock = func() time.Time { return now.Add(time.Hour + 123*time.Nanosecond) }
+	got, err := w.service.Approve(ctx, decision())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DecidedAt.Nanosecond()%1000 != 0 || got.ExpiresAt.Nanosecond()%1000 != 0 {
+		t.Fatalf("decided at %v, ends at %v", got.DecidedAt, got.ExpiresAt)
+	}
+}
