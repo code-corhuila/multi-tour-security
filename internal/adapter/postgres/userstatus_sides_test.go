@@ -36,6 +36,11 @@ func TestI_InactivatingAPersonWithBothSidesSwitchesOffTheTeamSideOnly(t *testing
 	if err != nil || !slices.Equal(roles, []string{"FINAL_CUSTOMER"}) {
 		t.Fatalf("roles %v %v", roles, err)
 	}
+	// the role is still held: an e-mail that is taken is judged by what the person holds, not by what is on now
+	held, err := postgres.NewAccounts(pool).RolesHeld(ctx, id)
+	if err != nil || !slices.Equal(held, []string{"FINAL_CUSTOMER", "OPERATIONAL_COLLABORATOR"}) {
+		t.Fatalf("held %v %v", held, err)
+	}
 	// the sessions end as for any inactivation, and the fact is written once
 	if n := revocations(t, pool, id); n != 1 {
 		t.Fatalf("%d facts", n)
