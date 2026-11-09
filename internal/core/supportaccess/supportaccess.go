@@ -126,6 +126,10 @@ func (a Access) At(now time.Time) Access {
 
 // Approve is the decision of a Tenant Administrator: the hours asked run from now, never more than 24.
 func (a Access) Approve(decidedBy string, now time.Time) (Access, error) {
+	// an access built outside New is not trusted for the hours it carries (RN-SEC-009-04: never more than 24)
+	if a.Hours < 1 || a.Hours > MaxHours {
+		return Access{}, ErrInvalidHours
+	}
 	if a.At(now).Status != Pending {
 		return Access{}, ErrInvalidTransition
 	}
