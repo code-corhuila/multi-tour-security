@@ -63,7 +63,7 @@ func (s *SupportAccesses) Open(ctx context.Context, requestedBy, id string, now 
 const closeSupportAccess = `
 WITH closed AS (
     UPDATE security.support_access SET status = 'CLOSED', closed_at = $2::timestamptz, closed_reason = $3
-    WHERE support_access_id = $1::uuid AND status = 'APPROVED' AND expires_at > $2::timestamptz
+    WHERE support_access_id = $1::uuid AND requested_by = $5::uuid AND status = 'APPROVED' AND expires_at > $2::timestamptz
     RETURNING support_access_id, tenant_id, requested_by, opened_at
 ), cut AS (
     UPDATE security.identity i SET sessions_revoked_from = GREATEST(COALESCE(i.sessions_revoked_from, $2::timestamptz), $2::timestamptz)
@@ -86,10 +86,10 @@ WITH closed AS (
 )
 SELECT count(*) FROM closed`
 
-// Close ends an access before its time. It says false when the access is not approved any more or has run out.
+// Close ends an access before its time. It says false when the access is not the caller's, is not approved any more or has run out.
 func (s *SupportAccesses) Close(ctx context.Context, a supportaccess.Access, correlationID string) (bool, error) {
 	var closed int
-	if err := s.pool.QueryRow(ctx, closeSupportAccess, a.ID, a.ClosedAt, a.ClosedReason, correlationID).Scan(&closed); err != nil {
+	if err := s.pool.QueryRow(ctx, closeSupportAccess, a.ID, a.ClosedAt, a.ClosedReason, correlationID, a.RequestedBy).Scan(&closed); err != nil {
 		return false, err
 	}
 	return closed == 1, nil
@@ -117,6 +117,9 @@ FROM expired WHERE opened_at IS NOT NULL`
 
 // ExpireApproved marks as expired the approved accesses that ran out, of one author or of one tenant (the other filter is empty).
 func (s *SupportAccesses) ExpireApproved(ctx context.Context, requestedBy, tenantID string, now time.Time) error {
+	if requestedBy == "" && tenantID == "" {
+		return errors.New("an expiry is of one author or of one tenant, never of every tenant")
+	}
 	_, err := s.pool.Exec(ctx, expireApproved, now, requestedBy, tenantID)
 	return err
 }

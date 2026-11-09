@@ -82,6 +82,10 @@ func (s *Service) Token(ctx context.Context, c TokenCommand) (Token, error) {
 	if !ok {
 		return Token{}, supportaccess.ErrInvalidTransition
 	}
+	// the access is read again after it opened: a closing or the end of its hours between the two leaves it without a token
+	if err := opened.CanTakeToken(now); err != nil {
+		return Token{}, err
+	}
 	claims, err := token.Exceptional(opened.RequestedBy, opened.TenantID, opened.Scope(), opened.ID, opened.ExpiresAt, now)
 	if err != nil {
 		return Token{}, err
