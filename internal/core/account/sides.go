@@ -8,7 +8,7 @@ const (
 	ContextTeam     = "TEAM"
 )
 
-// RoleFinalCustomer is the role of the customer side; every other role but the platform one is the team side.
+// RoleFinalCustomer is the role of the customer side; every other role is the team side (the platform account holds no customer role).
 const RoleFinalCustomer = "FINAL_CUSTOMER"
 
 // ForContext narrows the roles of an account to the side that asked. An account with one side carries it whatever was asked and

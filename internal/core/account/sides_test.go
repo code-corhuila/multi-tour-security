@@ -62,3 +62,10 @@ func TestD_ForContextDoesNotChangeItsInput(t *testing.T) {
 		t.Fatalf("%v", in)
 	}
 }
+
+func TestD_AnAccountWithNoRoleHasNoSide(t *testing.T) {
+	ctx, roles := account.ForContext(nil, account.ContextTeam)
+	if ctx != "" || len(roles) != 0 {
+		t.Fatalf("%q %v", ctx, roles)
+	}
+}
