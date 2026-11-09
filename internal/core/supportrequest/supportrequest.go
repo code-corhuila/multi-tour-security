@@ -87,7 +87,7 @@ func (s *Service) Ask(ctx context.Context, c Command) (supportaccess.Access, boo
 	}
 	// a repeat of the key is answered with the request it made, whatever the body or the tenant are now (Annex C)
 	if prior, found, err := s.Store.FindByKey(ctx, c.ActorID, c.IdempotencyKey); err != nil || found {
-		return prior, false, err
+		return prior.At(s.Clock()), false, err
 	}
 	if !validate.UUID(c.TenantID) {
 		return supportaccess.Access{}, false, &FieldError{Field: tenantField}
@@ -111,7 +111,8 @@ func (s *Service) Ask(ctx context.Context, c Command) (supportaccess.Access, boo
 	if !found || (copyOfTenant.Status != tenant.Active && copyOfTenant.Status != tenant.Inactive) {
 		return supportaccess.Access{}, false, ErrTenantNotFound
 	}
-	return s.Store.Create(ctx, request, c.IdempotencyKey)
+	made, created, err := s.Store.Create(ctx, request, c.IdempotencyKey)
+	return made.At(s.Clock()), created, err
 }
 
 // List shows the requests of the caller. The ones that ran out are shown as expired, and a pending request nobody decided in time is

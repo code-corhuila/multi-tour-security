@@ -60,7 +60,11 @@ func (s *SupportAccesses) Create(ctx context.Context, a supportaccess.Access, ke
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return supportaccess.Access{}, false, err
 	}
-	prior, _, err := s.FindByKey(ctx, a.RequestedBy, key)
+	prior, found, err := s.FindByKey(ctx, a.RequestedBy, key)
+	if err == nil && !found {
+		// the key was taken a moment ago and the row is gone: nothing can be answered for it
+		err = errors.New("the idempotency key was taken and cannot be read")
+	}
 	return prior, false, err
 }
 
