@@ -10,6 +10,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/account"
 	"github.com/code-corhuila/multi-tour-security/internal/core/supportaccess"
 	"github.com/code-corhuila/multi-tour-security/internal/core/supportdecision"
+	"github.com/code-corhuila/multi-tour-security/internal/core/token"
 )
 
 // SupportDecider is what the routes of the Tenant Administrator need from the use case, so a test can replace it.
@@ -25,16 +26,13 @@ func WithSupportDecisions(service SupportDecider) Option {
 	return func(s *server) { s.supportDecisions = service }
 }
 
-// restrictedAccess is the mark of the Administrator of an inactive tenant (ADR-004 D5).
-const restrictedAccess = "restricted"
-
 // requireTenantAdministratorOrRestricted lets in the Tenant Administrator of a tenant, with an ordinary token or with the restricted access
 // of an inactive tenant, and nobody else: the approval of a support access is still theirs when the tenant is inactive (HU-SEC-007, AC2).
 // The other marks (a temporary credential, the access of a support) and every other role are refused.
 func (s *server) requireTenantAdministratorOrRestricted(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, _ := r.Context().Value(claimsKey{}).(Claims)
-		if !slices.Contains(claims.Roles, account.RoleTenantAdministrator) || claims.TenantID == "" || (claims.Access != "" && claims.Access != restrictedAccess) {
+		if !slices.Contains(claims.Roles, account.RoleTenantAdministrator) || claims.TenantID == "" || (claims.Access != "" && claims.Access != token.RestrictedAccess) {
 			writeError(w, r, http.StatusForbidden, "FORBIDDEN", "access denied")
 			return
 		}

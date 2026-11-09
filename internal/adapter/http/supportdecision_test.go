@@ -222,3 +222,11 @@ func TestC_TheListIsOfTheTenantOfTheCredentialAndItsParametersAreTheDeclaredOnes
 		}
 	}
 }
+
+// The exception is narrow: the restricted access reaches these three routes and no other route of the Administrator keeps it out any less.
+func TestC_TheRestrictedAccessStillGetsNoOtherRouteOfTheAdministrator(t *testing.T) {
+	svc := &fakeLister{page: onePage()}
+	if rec := getUsers(listHandler(svc, io.Discard), restrictedAdmin(t), ""); rec.Code != http.StatusForbidden || len(svc.queries) != 0 {
+		t.Fatalf("the list of users: %d", rec.Code)
+	}
+}
