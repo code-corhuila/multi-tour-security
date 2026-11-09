@@ -23,6 +23,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/refresh"
 	"github.com/code-corhuila/multi-tour-security/internal/core/requestlink"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
+	"github.com/code-corhuila/multi-tour-security/internal/core/supportdecision"
 	"github.com/code-corhuila/multi-tour-security/internal/core/supportrequest"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenantevent"
 	"github.com/code-corhuila/multi-tour-security/internal/core/verifyemail"
@@ -74,6 +75,7 @@ func build(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Handler, *
 		httpadapter.WithChangePermission(&changepermission.Service{Store: postgres.NewUserPermissions(pool), Clock: time.Now}),
 		httpadapter.WithChangeUserStatus(&changestatus.Service{Store: postgres.NewUserStatus(pool), Clock: time.Now}),
 		httpadapter.WithSupportRequests(&supportrequest.Service{Tenants: tenants, Store: postgres.NewSupportAccesses(pool), Clock: time.Now}),
+		httpadapter.WithSupportDecisions(&supportdecision.Service{Store: postgres.NewSupportAccesses(pool), Clock: time.Now}),
 		httpadapter.WithOutbox(events),
 		httpadapter.WithTenantEvents(&tenantevent.Service{Tenants: tenants}),
 		httpadapter.WithLinkRequests(askForLink, background), httpadapter.WithEmailConfirmation(confirmEmail),

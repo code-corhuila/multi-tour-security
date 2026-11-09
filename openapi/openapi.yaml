@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Multitour security
-  version: 0.9.0
+  version: 0.10.0
   description: >
     The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
     (ADR-004 D7). It carries only the operations the service implements; every story adds its operations here
@@ -284,6 +284,137 @@ paths:
         "401":
           $ref: '#/components/responses/Unauthorized'
         "403":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/support-accesses:
+    get:
+      summary: List the support accesses asked for the tenant
+      description: >
+        The Tenant Administrator lists the support requests that concern the tenant of the token (HU-SEC-007, part A), newest first, with the
+        listing envelope. The tenant is the tenantId of the token and no parameter can change it; a parameter that is not declared, a
+        repeated one or a value out of range is 400. status narrows to one status. Only a token with the role TENANT_ADMINISTRATOR and a
+        tenant is accepted, with no mark or with the restricted access of an inactive tenant.
+      operationId: listSupportAccesses
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: status
+          in: query
+          schema: {$ref: '#/components/schemas/SupportAccessStatus'}
+      responses:
+        "200":
+          description: One page of support accesses
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccessPage'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/support-accesses/{supportAccessId}/approval:
+    post:
+      summary: Approve a support access
+      description: >
+        A Tenant Administrator of the tenant approves a PENDING request: from that moment the hours asked run, never more than 24, and the
+        access ends by itself. Another status, or a request nobody decided in 72 hours, is 422 INVALID_STATUS_TRANSITION; a request of
+        another tenant or one that does not exist is 404. Only a token with the role TENANT_ADMINISTRATOR and a tenant is accepted, with no
+        mark or with the restricted access of an inactive tenant.
+      operationId: approveSupportAccess
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: supportAccessId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The support access as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccess'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/support-accesses/{supportAccessId}/rejection:
+    post:
+      summary: Reject a support access
+      description: >
+        A Tenant Administrator of the tenant rejects a PENDING request, with a reason of 1 to 500 characters. Another status is 422
+        INVALID_STATUS_TRANSITION; a request of another tenant or one that does not exist is 404; a field that is not in the contract is 400.
+        Only a token with the role TENANT_ADMINISTRATOR and a tenant is accepted, with no mark or with the restricted access.
+      operationId: rejectSupportAccess
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: supportAccessId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusChangeRequest'
+      responses:
+        "200":
+          description: The support access as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccess'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
