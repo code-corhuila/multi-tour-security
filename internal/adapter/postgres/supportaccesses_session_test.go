@@ -240,3 +240,64 @@ func TestI_ExpiringByTenantTouchesOnlyThatTenantAndByAuthorOnlyThatAuthor(t *tes
 		t.Fatalf("by author: %s %s", status(revived.ID), status(revivedOther.ID))
 	}
 }
+
+func TestI_TwoFirstTokensAtOnceOpenTheAccessOnceAndWriteOneFact(t *testing.T) {
+	store, pool, root := supportSetup(t)
+	approved := approvedAccess(t, store, pool, root, "ask-0001-abcd")
+	start := make(chan struct{})
+	type outcome struct {
+		ok  bool
+		err error
+	}
+	results := make(chan outcome, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			<-start
+			_, ok, err := store.Open(ctx, root, approved.ID, base.Add(2*time.Hour), "corr-open")
+			results <- outcome{ok, err}
+		}()
+	}
+	close(start)
+	for i := 0; i < 2; i++ {
+		if r := <-results; r.err != nil || !r.ok {
+			t.Fatalf("open: ok=%v err=%v", r.ok, r.err)
+		}
+	}
+	if n := len(facts(t, pool, "PlatformExceptionalAccessOpened")); n != 1 {
+		t.Fatalf("%d opening facts", n)
+	}
+}
+
+func TestI_ACutoffThatIsLaterIsNotMovedBackByClosing(t *testing.T) {
+	store, pool, root := supportSetup(t)
+	approved := approvedAccess(t, store, pool, root, "ask-0001-abcd")
+	later := base.Add(10 * time.Hour)
+	if _, err := pool.Exec(ctx, `UPDATE security.identity SET sessions_revoked_from = $2 WHERE identity_id = $1::uuid`, root, later); err != nil {
+		t.Fatal(err)
+	}
+	closed, _ := approved.Close("done", base.Add(2*time.Hour))
+	if ok, err := store.Close(ctx, closed, "corr"); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	var cutoff time.Time
+	if err := pool.QueryRow(ctx, `SELECT sessions_revoked_from FROM security.identity WHERE identity_id = $1::uuid`, root).Scan(&cutoff); err != nil || !cutoff.Equal(later) {
+		t.Fatalf("cutoff = %v %v", cutoff, err)
+	}
+}
+
+func TestI_AnAdministratorClosesOnlyTheirOwnAccessAndNoExpiryRunsWithoutAFilter(t *testing.T) {
+	store, pool, root := supportSetup(t)
+	other := pgtest.MustAccount(t, pool, "", "second-root@multitour.example", "PLATFORM_ADMINISTRATOR")
+	approved := approvedAccess(t, store, pool, root, "ask-0001-abcd")
+	foreign, _ := approved.Close("done", base.Add(2*time.Hour))
+	foreign.RequestedBy = other
+	if ok, err := store.Close(ctx, foreign, "corr"); err != nil || ok {
+		t.Fatalf("another administrator closed it: ok=%v err=%v", ok, err)
+	}
+	if got, _, _ := store.FindOwn(ctx, root, approved.ID); got.Status != supportaccess.Approved {
+		t.Fatalf("status %s", got.Status)
+	}
+	if err := store.ExpireApproved(ctx, "", "", base.Add(100*time.Hour)); err == nil {
+		t.Fatal("an expiry with no filter ran")
+	}
+}

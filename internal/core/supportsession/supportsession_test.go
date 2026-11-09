@@ -31,6 +31,7 @@ type fakeStore struct {
 	expiredFor  []string
 	refuseOpen  bool
 	refuseClose bool
+	afterOpen   func(*supportaccess.Access) // changes what Open answers, as a closing between the opening and the re-read would
 	err         error
 }
 
@@ -52,6 +53,9 @@ func (f *fakeStore) Open(_ context.Context, requestedBy, id string, at time.Time
 		a.OpenedAt = at
 	}
 	f.items[id] = a
+	if f.afterOpen != nil {
+		f.afterOpen(&a)
+	}
 	return a, true, nil
 }
 
@@ -265,5 +269,37 @@ func TestA_NothingRunsWithoutItsPieces(t *testing.T) {
 	}
 	if _, err := (&supportsession.Service{}).Close(ctx, supportsession.CloseCommand{ActorID: platform, ID: accessID, Reason: "r", CorrelationID: "c"}); err == nil || fieldOf(err) != "" {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// Between the opening and the re-read the access may be closed or run out: no token is signed for it.
+func TestA_AnAccessThatEndedBetweenTheOpeningAndTheReadGivesNoToken(t *testing.T) {
+	for name, edit := range map[string]func(*supportaccess.Access){
+		"closed":  func(a *supportaccess.Access) { a.Status = supportaccess.Closed },
+		"expired": func(a *supportaccess.Access) { a.Status = supportaccess.Expired },
+		"over":    func(a *supportaccess.Access) { a.ExpiresAt = now },
+	} {
+		w := newWorld(t, nil)
+		w.store.afterOpen = edit
+		if _, err := w.service.Token(ctx, supportsession.TokenCommand{ActorID: platform, ID: accessID, CorrelationID: "c"}); !errors.Is(err, supportaccess.ErrInvalidTransition) {
+			t.Errorf("%s: err = %v", name, err)
+		}
+		if len(w.signer.claims) != 0 {
+			t.Errorf("%s: a token was signed", name)
+		}
+	}
+}
+
+// A failure to sign leaves the access open; the retry opens it again (the store writes no second fact) and gives the token.
+func TestA_ARetryAfterAFailureToSignGivesTheTokenAndOpensAgain(t *testing.T) {
+	w := newWorld(t, nil)
+	w.signer.err = errors.New("no key")
+	if _, err := w.service.Token(ctx, supportsession.TokenCommand{ActorID: platform, ID: accessID, CorrelationID: "c"}); err == nil {
+		t.Fatal("expected the failure")
+	}
+	w.signer.err = nil
+	got, err := w.service.Token(ctx, supportsession.TokenCommand{ActorID: platform, ID: accessID, CorrelationID: "c"})
+	if err != nil || got.AccessToken == "" || len(w.store.opens) != 2 || len(w.signer.claims) != 1 {
+		t.Fatalf("err=%v opens=%d signed=%d", err, len(w.store.opens), len(w.signer.claims))
 	}
 }
