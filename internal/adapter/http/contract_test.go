@@ -29,6 +29,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/supportaccess"
 	"github.com/code-corhuila/multi-tour-security/internal/core/supportdecision"
 	"github.com/code-corhuila/multi-tour-security/internal/core/supportrequest"
+	"github.com/code-corhuila/multi-tour-security/internal/core/supportsession"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenantevent"
 	"github.com/code-corhuila/multi-tour-security/internal/core/verifyemail"
 )
@@ -532,6 +533,33 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		{http.MethodPost, rejectionPath, "application/json", `{"reason":"no"}`, tenantSupportAdmin, &fakeDecider{err: errors.New("boom")}, http.StatusInternalServerError},
 	} {
 		run(decisionHandler(c.svc, io.Discard), c.method, c.path, c.contentType, c.body, c.token, c.want)
+	}
+
+	// the Platform Administrator takes the token of an approved support access and closes it (HU-SEC-007 part A)
+	sessionAdmin := platformAdminToken(t)
+	bigClosure := `{"reason":"` + strings.Repeat("r", 4200) + `"}`
+	for _, c := range []struct {
+		path, contentType, body, token string
+		svc                            *fakeSession
+		want                           int
+	}{
+		{tokenRoute, "", "", sessionAdmin, &fakeSession{token: someToken()}, http.StatusOK},
+		{tokenRoute, "", "", "", &fakeSession{}, http.StatusUnauthorized},
+		{tokenRoute, "", "", tenantAdmin, &fakeSession{}, http.StatusForbidden},
+		{tokenRoute, "", "", sessionAdmin, &fakeSession{err: supportsession.ErrNotFound}, http.StatusNotFound},
+		{tokenRoute, "", "", sessionAdmin, &fakeSession{err: supportaccess.ErrInvalidTransition}, http.StatusUnprocessableEntity},
+		{tokenRoute, "", "", sessionAdmin, &fakeSession{err: errors.New("boom")}, http.StatusInternalServerError},
+		{closeRoute, "application/json", `{"reason":"done"}`, sessionAdmin, &fakeSession{access: closedAccess()}, http.StatusOK},
+		{closeRoute, "application/json", `{"reason":`, sessionAdmin, &fakeSession{}, http.StatusBadRequest},
+		{closeRoute, "application/json", `{"reason":"done"}`, "", &fakeSession{}, http.StatusUnauthorized},
+		{closeRoute, "application/json", `{"reason":"done"}`, tenantAdmin, &fakeSession{}, http.StatusForbidden},
+		{closeRoute, "application/json", `{"reason":"done"}`, sessionAdmin, &fakeSession{err: supportsession.ErrNotFound}, http.StatusNotFound},
+		{closeRoute, "application/json", bigClosure, sessionAdmin, &fakeSession{}, http.StatusRequestEntityTooLarge},
+		{closeRoute, "text/plain", `{"reason":"done"}`, sessionAdmin, &fakeSession{}, http.StatusUnsupportedMediaType},
+		{closeRoute, "application/json", `{"reason":"done"}`, sessionAdmin, &fakeSession{err: supportaccess.ErrInvalidTransition}, http.StatusUnprocessableEntity},
+		{closeRoute, "application/json", `{"reason":"done"}`, sessionAdmin, &fakeSession{err: errors.New("boom")}, http.StatusInternalServerError},
+	} {
+		run(sessionHandler(c.svc, io.Discard), http.MethodPost, c.path, c.contentType, c.body, c.token, c.want)
 	}
 
 	for path, item := range doc.Paths.Map() {
