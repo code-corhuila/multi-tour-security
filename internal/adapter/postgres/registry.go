@@ -92,6 +92,60 @@ func (r *Registry) Create(ctx context.Context, n port.NewAccount, scope, key str
 	return reg, nil
 }
 
+// AddRole gives the internal role to the account of an active, verified Final Customer of the tenant, in one transaction with the key. The
+// account row is locked, so the check "still a customer with no internal role" and the insert cannot be split by another request. No
+// account, no fact and no password is written (HU-SEC-008, RN-SEC-007-01 and -09).
+func (r *Registry) AddRole(ctx context.Context, a port.AddedRole, scope, key string) (port.Registered, error) {
+	if a.TenantID == "" || a.AccountID == "" || !account.IsInternalRole(a.Role) {
+		return port.Registered{}, errors.New("a role is added to an account of a tenant, and it is an internal one")
+	}
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return port.Registered{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`, scope, key); err != nil {
+		return port.Registered{}, err
+	}
+	if _, taken, err := keyOwner(ctx, tx, scope, key); err != nil || taken {
+		if err == nil {
+			err = port.ErrKeyTaken
+		}
+		return port.Registered{}, err
+	}
+	if err := requireEnabledRole(ctx, tx, port.NewAccount{TenantID: a.TenantID, Role: a.Role}); err != nil {
+		return port.Registered{}, err
+	}
+	var membership string
+	err = tx.QueryRow(ctx, `
+		SELECT m.membership_id::text FROM security.identity i JOIN security.membership m USING (identity_id)
+		WHERE i.identity_id = $1::uuid AND i.tenant_id = $2::uuid AND i.identity_status = 'ACTIVE' AND m.membership_status = 'ACTIVE'
+		  AND EXISTS (SELECT 1 FROM security.membership_role c WHERE c.membership_id = m.membership_id AND c.role = 'FINAL_CUSTOMER')
+		  AND NOT EXISTS (SELECT 1 FROM security.membership_role o WHERE o.membership_id = m.membership_id AND o.role <> 'FINAL_CUSTOMER')
+		FOR UPDATE OF i`, a.AccountID, a.TenantID).Scan(&membership)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return port.Registered{}, port.ErrEmailTaken
+	}
+	if err != nil {
+		return port.Registered{}, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO security.membership_role (membership_id, role) VALUES ($1::uuid, $2)`, membership, a.Role); err != nil {
+		return port.Registered{}, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO security.idempotency_key (scope, idempotency_key, identity_id) VALUES ($1, $2, $3::uuid)`, scope, key, a.AccountID); err != nil {
+		return port.Registered{}, uniqueViolation(err, "pk_idempotency_key", port.ErrKeyTaken)
+	}
+	reg, err := load(ctx, tx, a.AccountID)
+	if err != nil {
+		return port.Registered{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return port.Registered{}, err
+	}
+	return reg, nil
+}
+
 // requireEnabledRole refuses an optional role that the tenant has not enabled (HU-SEC-006, plan D-10). It reads the setting row in share
 // mode, inside the transaction that inserts the account: the disabling of the role locks that row for update and counts the active
 // holders after it, so a registration and a disabling at once are serialized and none leaves an active holder in a disabled role. A role
@@ -163,11 +217,11 @@ func uniqueViolation(err error, constraint string, as error) error {
 // min(role) is that role; it only picks one deterministically if another story gives an account more.
 func load(ctx context.Context, q rowQuerier, id string) (port.Registered, error) {
 	var reg port.Registered
-	a, err := scanAccount(q.QueryRow(ctx, `SELECT `+accountColumns+`, COALESCE(full_name, ''), COALESCE(phone, ''), email_verified, COALESCE(r.role, ''), created_at, `+assignedPermissions+`
+	a, err := scanAccount(q.QueryRow(ctx, `SELECT `+accountColumns+`, COALESCE(full_name, ''), COALESCE(phone, ''), email_verified, COALESCE(r.role, ''), r.roles, created_at, `+assignedPermissions+`
 		FROM security.identity
-		LEFT JOIN LATERAL (SELECT min(mr.role) AS role FROM security.membership m
+		LEFT JOIN LATERAL (SELECT min(mr.role) AS role, COALESCE(array_agg(mr.role ORDER BY mr.role), '{}') AS roles FROM security.membership m
 			JOIN security.membership_role mr USING (membership_id) WHERE m.identity_id = identity.identity_id) r ON true
-		WHERE identity_id = $1::uuid`, id), &reg.FullName, &reg.Phone, &reg.EmailVerified, &reg.Role, &reg.CreatedAt, &reg.Permissions)
+		WHERE identity_id = $1::uuid`, id), &reg.FullName, &reg.Phone, &reg.EmailVerified, &reg.Role, &reg.Roles, &reg.CreatedAt, &reg.Permissions)
 	reg.Account = a
 	if err != nil {
 		return port.Registered{}, err
