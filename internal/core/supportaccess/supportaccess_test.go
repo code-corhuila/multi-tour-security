@@ -154,13 +154,13 @@ func TestD_TheTokenIsTakenOnlyWhileTheAccessIsApprovedAndNotOver(t *testing.T) {
 		at time.Time
 		ok bool
 	}{
-		"pending":          {pending, now, false},
-		"rejected":         {rejected, now, false},
-		"approved":         {approved, now.Add(time.Hour), true},
-		"at the very end":  {approved, approved.ExpiresAt, false},
-		"after the end":    {approved, approved.ExpiresAt.Add(time.Minute), false},
-		"closed":           {closed, now.Add(2 * time.Hour), false},
-		"approved, before": {approved, now, true},
+		"pending":         {pending, now, false},
+		"rejected":        {rejected, now, false},
+		"approved":        {approved, now.Add(time.Hour), true},
+		"at the very end": {approved, approved.ExpiresAt, false},
+		"after the end":   {approved, approved.ExpiresAt.Add(time.Minute), false},
+		"closed":          {closed, now.Add(2 * time.Hour), false},
+		"at the approval": {approved, now, true},
 	}
 	for name, c := range cases {
 		err := c.a.CanTakeToken(c.at)
@@ -202,5 +202,61 @@ func TestD_TheScopeOfTheTokenIsTheApprovedAreasAndNothingElse(t *testing.T) {
 	got[0] = "CUSTOMERS"
 	if a.Scope()[0] != "CASH" {
 		t.Error("the caller changed the areas of the access")
+	}
+}
+
+// The reason is counted in characters, not in bytes: 500 of two bytes are accepted and 501 are not, in the three places that take one.
+func TestD_TheReasonIsCountedInCharactersNotInBytes(t *testing.T) {
+	ok, long := strings.Repeat("ñ", 500), strings.Repeat("ñ", 501)
+	if _, err := supportaccess.New(tenantID, platform, ok, []string{"CASH"}, 1, now); err != nil {
+		t.Errorf("500 characters in New: %v", err)
+	}
+	if _, err := supportaccess.New(tenantID, platform, long, []string{"CASH"}, 1, now); !errors.Is(err, supportaccess.ErrInvalidReason) {
+		t.Errorf("501 characters in New: %v", err)
+	}
+	if _, err := request(t).Reject(admin, ok, now); err != nil {
+		t.Errorf("500 characters in Reject: %v", err)
+	}
+	if _, err := request(t).Reject(admin, long, now); !errors.Is(err, supportaccess.ErrInvalidReason) {
+		t.Errorf("501 characters in Reject: %v", err)
+	}
+	approved, _ := request(t).Approve(admin, now)
+	if _, err := approved.Close(ok, now); err != nil {
+		t.Errorf("500 characters in Close: %v", err)
+	}
+	if _, err := approved.Close(long, now); !errors.Is(err, supportaccess.ErrInvalidReason) {
+		t.Errorf("501 characters in Close: %v", err)
+	}
+}
+
+// The window to decide ends at the instant, not after it.
+func TestD_ADecisionAtExactly72HoursIsTooLate(t *testing.T) {
+	if _, err := request(t).Approve(admin, now.Add(72*time.Hour-time.Second)); err != nil {
+		t.Errorf("one second before: %v", err)
+	}
+	if _, err := request(t).Approve(admin, now.Add(72*time.Hour)); !errors.Is(err, supportaccess.ErrInvalidTransition) {
+		t.Errorf("at 72 hours: %v", err)
+	}
+	if _, err := request(t).Reject(admin, "no", now.Add(72*time.Hour)); !errors.Is(err, supportaccess.ErrInvalidTransition) {
+		t.Errorf("rejecting at 72 hours: %v", err)
+	}
+}
+
+func TestD_AreaNamesIsACopy(t *testing.T) {
+	names := supportaccess.AreaNames()
+	names[0] = "CUSTOMERS"
+	if supportaccess.AreaNames()[0] != "RESERVATIONS" {
+		t.Error("the caller changed the closed list")
+	}
+}
+
+// An access built outside New, with hours the rules do not allow, is never approved for them (a corrupt row, a careless adapter).
+func TestD_AnAccessWithHoursOutOfRangeIsNeverApproved(t *testing.T) {
+	for _, hours := range []int{0, -3, 25, 1000} {
+		a := request(t)
+		a.Hours = hours
+		if _, err := a.Approve(admin, now); !errors.Is(err, supportaccess.ErrInvalidHours) {
+			t.Errorf("%d hours: %v", hours, err)
+		}
 	}
 }
