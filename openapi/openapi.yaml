@@ -1666,9 +1666,9 @@ components:
           items:
             $ref: '#/components/schemas/SupportArea'
         hours: {type: integer}
-        requestedBy: {type: string}
+        requestedBy: {type: string, format: uuid}
         requestedAt: {type: string, format: date-time}
-        decidedBy: {type: string}
+        decidedBy: {type: string, format: uuid}
         decidedAt: {type: string, format: date-time}
         decisionReason: {type: string}
         expiresAt: {type: string, format: date-time}
