@@ -30,9 +30,9 @@ const utcTime = `'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`
 const (
 	tenantNameOfAccount = `COALESCE((SELECT c.commercial_name FROM security.tenant_copy c WHERE c.tenant_id = i.tenant_id), 'Multitour')`
 	tenantNameOfChanged = `COALESCE((SELECT c.commercial_name FROM security.tenant_copy c WHERE c.tenant_id = changed.tenant_id), 'Multitour')`
-	// the roles the account holds, whatever their status, as RolesHeld reads them
+	// the roles of the active membership, whatever their own status, as RolesHeld reads them
 	rolesOfAccount = `COALESCE((SELECT jsonb_agg(mr.role ORDER BY mr.role) FROM security.membership m
-		JOIN security.membership_role mr USING (membership_id) WHERE m.identity_id = i.identity_id), '[]'::jsonb)`
+		JOIN security.membership_role mr USING (membership_id) WHERE m.identity_id = i.identity_id AND m.membership_status = 'ACTIVE'), '[]'::jsonb)`
 )
 
 // Issue counts, retires and writes in one transaction that holds the row of the account, so codes asked for at the same
