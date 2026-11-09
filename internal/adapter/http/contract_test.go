@@ -26,6 +26,8 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 	"github.com/code-corhuila/multi-tour-security/internal/core/recoverpassword"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
+	"github.com/code-corhuila/multi-tour-security/internal/core/supportaccess"
+	"github.com/code-corhuila/multi-tour-security/internal/core/supportrequest"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenantevent"
 	"github.com/code-corhuila/multi-tour-security/internal/core/verifyemail"
 )
@@ -119,7 +121,7 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 			req.Header.Set("Content-Type", contentType)
 		}
 		req.Header.Set("X-Correlation-Id", "gate-1")
-		if strings.HasSuffix(path, "/events") || strings.HasSuffix(path, "/accounts") || strings.HasSuffix(path, "/administrators") || strings.HasSuffix(path, "/users") {
+		if strings.HasSuffix(path, "/events") || strings.HasSuffix(path, "/accounts") || strings.HasSuffix(path, "/administrators") || strings.HasSuffix(path, "/users") || strings.HasSuffix(path, "/platform-support-accesses") {
 			req.Header.Set("Idempotency-Key", eventKey)
 		}
 		rec := httptest.NewRecorder()
@@ -467,6 +469,34 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		{http.MethodPost, disablePath, admin, &fakeRoles{err: errors.New("boom")}, http.StatusInternalServerError},
 	} {
 		run(rolesHandler(c.svc, io.Discard), c.method, c.path, "", "", c.token, c.want)
+	}
+
+	// the support access of the Platform Administrator (HU-SEC-007 part A): ask and list the own requests
+	platformAdmin := platformAdminToken(t)
+	tenantAdmin := tokenWith(t, []string{"TENANT_ADMINISTRATOR"}, accountTenant, "")
+	bigSupport := `{"tenantId":"3f2b8c1e-5d4a-4f6b-9c7d-1a2b3c4d5e6f","reason":"` + strings.Repeat("r", 4200) + `","areas":["CASH"],"hours":1}`
+	supportPage := supportrequest.Page{Data: []supportaccess.Access{askedAccess()}, Page: 1, Limit: 20, Total: 1, TotalPages: 1}
+	for _, c := range []struct {
+		method, contentType, body, query, token string
+		svc                                     *fakeSupport
+		want                                    int
+	}{
+		{http.MethodPost, "application/json", supportBody, "", platformAdmin, &fakeSupport{access: askedAccess(), created: true}, http.StatusCreated},
+		{http.MethodPost, "application/json", supportBody, "", platformAdmin, &fakeSupport{access: askedAccess()}, http.StatusOK},
+		{http.MethodPost, "application/json", supportBody, "", platformAdmin, &fakeSupport{err: &supportrequest.FieldError{Field: "areas"}}, http.StatusBadRequest},
+		{http.MethodPost, "application/json", supportBody, "", "", &fakeSupport{}, http.StatusUnauthorized},
+		{http.MethodPost, "application/json", supportBody, "", tenantAdmin, &fakeSupport{}, http.StatusForbidden},
+		{http.MethodPost, "application/json", supportBody, "", platformAdmin, &fakeSupport{err: supportrequest.ErrTenantNotFound}, http.StatusNotFound},
+		{http.MethodPost, "application/json", bigSupport, "", platformAdmin, &fakeSupport{}, http.StatusRequestEntityTooLarge},
+		{http.MethodPost, "text/plain", supportBody, "", platformAdmin, &fakeSupport{}, http.StatusUnsupportedMediaType},
+		{http.MethodPost, "application/json", supportBody, "", platformAdmin, &fakeSupport{err: errors.New("boom")}, http.StatusInternalServerError},
+		{http.MethodGet, "", "", "", platformAdmin, &fakeSupport{page: supportPage}, http.StatusOK},
+		{http.MethodGet, "", "", "?limit=500", platformAdmin, &fakeSupport{err: &supportrequest.FieldError{Field: "limit"}}, http.StatusBadRequest},
+		{http.MethodGet, "", "", "", "", &fakeSupport{}, http.StatusUnauthorized},
+		{http.MethodGet, "", "", "", tenantAdmin, &fakeSupport{}, http.StatusForbidden},
+		{http.MethodGet, "", "", "", platformAdmin, &fakeSupport{err: errors.New("boom")}, http.StatusInternalServerError},
+	} {
+		run(supportHandler(c.svc, io.Discard), c.method, supportRoute+c.query, c.contentType, c.body, c.token, c.want)
 	}
 
 	for path, item := range doc.Paths.Map() {
