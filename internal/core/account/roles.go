@@ -6,6 +6,8 @@ import "slices"
 const (
 	RoleTenantAdministrator   = "TENANT_ADMINISTRATOR"
 	RolePlatformAdministrator = "PLATFORM_ADMINISTRATOR"
+	// RoleService is the role of the token of a service (job 7, a worker, a saga), which belongs to no person
+	RoleService = "SERVICE"
 	// RoleOperationalCollaborator is the role that may receive any of the four special permissions
 	RoleOperationalCollaborator = "OPERATIONAL_COLLABORATOR"
 )
