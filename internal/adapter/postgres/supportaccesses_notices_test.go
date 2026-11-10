@@ -39,6 +39,12 @@ func noticeSetup(t *testing.T, commercialName string) (*pgxpool.Pool, string, ma
 	mk("beto-admin", tenant, pgtest.Options{}, "TENANT_ADMINISTRATOR")
 	mk("inactive-admin", tenant, pgtest.Options{Inactive: true}, "TENANT_ADMINISTRATOR")
 	mk("membership-off-admin", tenant, pgtest.Options{MembershipInactive: true}, "TENANT_ADMINISTRATOR")
+	mk("role-off-admin", tenant, pgtest.Options{}, "TENANT_ADMINISTRATOR")
+	if _, err := pool.Exec(context.Background(), `UPDATE security.membership_role SET role_status = 'INACTIVE'
+		WHERE membership_id = (SELECT membership_id FROM security.membership WHERE identity_id = $1::uuid)`, accounts["role-off-admin"]); err != nil {
+		t.Fatal(err)
+	}
+	mk("pending-admin", tenant, pgtest.Options{Pending: true}, "TENANT_ADMINISTRATOR")
 	mk("other-tenant-admin", otherTenant, pgtest.Options{}, "TENANT_ADMINISTRATOR")
 	mk("collaborator", tenant, pgtest.Options{}, "OPERATIONAL_COLLABORATOR")
 	accounts["root"] = root
