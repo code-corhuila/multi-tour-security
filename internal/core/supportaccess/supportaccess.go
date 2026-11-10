@@ -36,6 +36,18 @@ const (
 	Closed   Status = "CLOSED"
 )
 
+// Basis says why the access exists: the authorization of a Tenant Administrator, or the emergency of the Platform Administrator
+// (HU-SEC-007 part B). An access built before the basis existed has none, which reads as the authorization.
+type Basis string
+
+const (
+	TenantAuthorization Basis = "TENANT_AUTHORIZATION"
+	Emergency           Basis = "EMERGENCY"
+)
+
+// SensitiveScope is the word the scope of the token carries when the access reaches the sensitive data (RN-SEC-010-05).
+const SensitiveScope = "SENSITIVE"
+
 const (
 	// MaxHours is the longest an access lasts (PDR section 9).
 	MaxHours = 24
@@ -50,6 +62,11 @@ var (
 	ErrInvalidReason     = errors.New("the reason must be between 1 and 500 characters")
 	ErrInvalidHours      = errors.New("the hours must be between 1 and 24")
 	ErrInvalidTransition = errors.New("the support access is not in a status that allows it")
+
+	ErrInvalidStatement           = errors.New("the statement must be between 1 and 500 characters")
+	ErrInvalidSensitiveReason     = errors.New("the sensitive data need their own justification of 1 to 500 characters, different from the general reason")
+	ErrSensitiveReasonWithoutFlag = errors.New("a justification for the sensitive data needs the sensitive flag")
+	ErrOpenAccessExists           = errors.New("the Platform Administrator already has an open access to that tenant")
 )
 
 // AreaNames lists the areas of the closed list, as a copy that the caller may change.
@@ -94,7 +111,15 @@ type Access struct {
 	OpenedAt       time.Time
 	ClosedAt       time.Time
 	ClosedReason   string
+	// Part B, the emergency access. Basis is empty or TenantAuthorization for the rest.
+	Basis           Basis
+	Statement       string
+	Sensitive       bool
+	SensitiveReason string
 }
+
+// IsEmergency tells whether the access was opened by the Platform Administrator alone.
+func (a Access) IsEmergency() bool { return a.Basis == Emergency }
 
 // New is a request of the Platform Administrator: pending, with the reason trimmed.
 func New(tenantID, requestedBy, reason string, areaNames []string, hours int, now time.Time) (Access, error) {
@@ -110,6 +135,36 @@ func New(tenantID, requestedBy, reason string, areaNames []string, hours int, no
 		return Access{}, err
 	}
 	return Access{TenantID: tenantID, RequestedBy: requestedBy, Reason: reason, Areas: parsed, Hours: hours, Status: Pending, RequestedAt: now}, nil
+}
+
+// NewEmergency is the emergency access of the Platform Administrator: it needs no approval, so it is approved from the start, opens and runs
+// from now for the hours asked (RN-SEC-010-02). The sensitive data are reached only with the flag and their own justification (RN-SEC-010-03).
+func NewEmergency(tenantID, openedBy, reason, statement string, areaNames []string, hours int, sensitive bool, sensitiveReason string, now time.Time) (Access, error) {
+	reason, statement, sensitiveReason = strings.TrimSpace(reason), strings.TrimSpace(statement), strings.TrimSpace(sensitiveReason)
+	if n := utf8.RuneCountInString(reason); n < 1 || n > MaxText {
+		return Access{}, ErrInvalidReason
+	}
+	if n := utf8.RuneCountInString(statement); n < 1 || n > MaxText {
+		return Access{}, ErrInvalidStatement
+	}
+	if hours < 1 || hours > MaxHours {
+		return Access{}, ErrInvalidHours
+	}
+	parsed, err := ParseAreas(areaNames)
+	if err != nil {
+		return Access{}, err
+	}
+	switch n := utf8.RuneCountInString(sensitiveReason); {
+	case sensitive && (n < 1 || n > MaxText || sensitiveReason == reason):
+		return Access{}, ErrInvalidSensitiveReason
+	case !sensitive && n > 0:
+		return Access{}, ErrSensitiveReasonWithoutFlag
+	}
+	return Access{
+		TenantID: tenantID, RequestedBy: openedBy, Reason: reason, Areas: parsed, Hours: hours, Status: Approved, RequestedAt: now,
+		DecidedAt: now, ExpiresAt: now.Add(time.Duration(hours) * time.Hour), OpenedAt: now,
+		Basis: Emergency, Statement: statement, Sensitive: sensitive, SensitiveReason: sensitiveReason,
+	}, nil
 }
 
 // At is the access as it stands at that instant: a request that waited 72 hours, and an approval whose hours are over, are Expired even if
@@ -176,6 +231,9 @@ func (a Access) Scope() []string {
 	scope := make([]string, len(a.Areas))
 	for i, area := range a.Areas {
 		scope[i] = string(area)
+	}
+	if a.Sensitive {
+		scope = append(scope, SensitiveScope)
 	}
 	return scope
 }
