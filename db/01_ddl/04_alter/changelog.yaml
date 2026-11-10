@@ -192,3 +192,20 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+  - changeSet:
+      id: security-ddl-alter-012
+      author: Molina211
+      labels: "HU-SEC-007,ddl,alter"
+      comment: "The basis, the statement and the sensitive data of an emergency access (spec 010)."
+      changes:
+        - sqlFile:
+            path: 012_add_emergency_access_columns.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/012_add_emergency_access_columns.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
