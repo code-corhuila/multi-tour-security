@@ -120,3 +120,58 @@ func TestI_AnAuthorizedAccessAndATenantWithoutAdministratorsRequestNoEndNotice(t
 		t.Errorf("%d notices for an authorized access", n)
 	}
 }
+
+// The hours of an emergency run out while the Platform Administrator opens another one for the same tenant: the expiry that OpenEmergency runs inside its
+// transaction writes the end notices too, to the same recipients (review of the end notices, G1 and G2).
+func TestI_OpeningAgainAfterTheHoursExpiresTheFirstEmergencyWithItsEndNoticesToTheSameAdministrators(t *testing.T) {
+	pool, root, _ := noticeSetup(t, "Travesia Natural SAS")
+	store := postgres.NewSupportAccesses(pool)
+	if _, _, err := store.OpenEmergency(ctx, emergencyAt(t, root, tenant, base, false), "ending-0004-abcd", "corr-ending-8"); err != nil {
+		t.Fatal(err)
+	}
+	if _, created, err := store.OpenEmergency(ctx, emergencyAt(t, root, tenant, base.Add(5*time.Hour), false), "ending-0004-wxyz", "corr-ending-9"); err != nil || !created {
+		t.Fatalf("second opening: created=%v err=%v", created, err)
+	}
+	ended := ofKind(notices(t, pool), "CLOSED")
+	if want := []string{"ana-admin@example.com", "beto-admin@example.com"}; !slices.Equal(recipients(ended), want) {
+		t.Fatalf("recipients = %v, want %v", recipients(ended), want)
+	}
+	for _, n := range ended {
+		if payload, _ := n["payload"].(map[string]any); payload["endedAt"] != "2026-10-10T14:00:00.000000Z" || n["correlationId"] != "support-access-expiry" {
+			t.Errorf("notice = %v", n)
+		}
+	}
+	// and the second emergency opened its own: two notices of the first opening, two of its end, two of the second opening
+	if n := len(notices(t, pool)); n != 6 {
+		t.Errorf("%d notices, want 6", n)
+	}
+}
+
+// An authorized access that runs out writes its closing fact and no notice, and the expiry of one tenant does not reach another (review, G3).
+func TestI_TheExpiryOfAnAuthorizedAccessWritesNoNoticeAndTheTenantFilterKeepsTheOthers(t *testing.T) {
+	pool, root, _ := noticeSetup(t, "Travesia Natural SAS")
+	store := postgres.NewSupportAccesses(pool)
+	authorized := approvedAccess(t, store, pool, root, "ask-0008-abcd")
+	if _, ok, err := store.Open(ctx, root, authorized.ID, base.Add(2*time.Hour), "corr-token"); err != nil || !ok {
+		t.Fatalf("token: ok=%v err=%v", ok, err)
+	}
+	if err := store.ExpireApproved(ctx, root, "", base.Add(6*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(notices(t, pool)); n != 0 {
+		t.Errorf("%d notices for an authorized access that ran out", n)
+	}
+	if n := len(facts(t, pool, "PlatformExceptionalAccessClosed")); n != 1 {
+		t.Errorf("%d closing facts, want the one of the authorized access", n)
+	}
+	// an emergency of this tenant is not expired by the expiry asked for another tenant
+	if _, _, err := store.OpenEmergency(ctx, emergencyAt(t, root, tenant, base.Add(7*time.Hour), false), "ending-0005-abcd", "corr-ending-10"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ExpireApproved(ctx, "", otherTenant, base.Add(20*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(ofKind(notices(t, pool), "CLOSED")); n != 0 {
+		t.Errorf("%d end notices: the expiry of another tenant reached this one", n)
+	}
+}
