@@ -86,7 +86,11 @@ func (s *Service) Token(ctx context.Context, c TokenCommand) (Token, error) {
 	if err := opened.CanTakeToken(now); err != nil {
 		return Token{}, err
 	}
-	claims, err := token.Exceptional(opened.RequestedBy, opened.TenantID, opened.Scope(), opened.ID, opened.ExpiresAt, now)
+	issue := token.Exceptional
+	if opened.IsEmergency() {
+		issue = token.Emergency
+	}
+	claims, err := issue(opened.RequestedBy, opened.TenantID, opened.Scope(), opened.ID, opened.ExpiresAt, now)
 	if err != nil {
 		return Token{}, err
 	}
