@@ -83,7 +83,7 @@ func (v *Verifier) Verify(raw string) (Claims, error) {
 		return Claims{}, errMalformedClaim
 	}
 	// the token of a support access has a tenant and the id of its authorization; no other token has one (ADR-004 D5)
-	exceptional := claims.Access == coretoken.ExceptionalAccess
+	exceptional := coretoken.IsSupportAccess(claims.Access)
 	if exceptional != (claims.AuthorizationID != "") || (exceptional && (claims.TenantID == "" || !uuidPattern.MatchString(claims.AuthorizationID))) {
 		return Claims{}, errMalformedClaim
 	}

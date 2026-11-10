@@ -36,7 +36,7 @@ func (s *Signer) Sign(c token.Claims) (string, error) {
 		return "", errors.New("the claims are not those of a token: they need a subject, an issuer and a life")
 	}
 	// the scope and the authorization belong to the token of a support access, and that token needs both and a tenant (ADR-004 D5)
-	exceptional := c.Access == token.ExceptionalAccess
+	exceptional := token.IsSupportAccess(c.Access)
 	if exceptional != (len(c.Scope) > 0) || exceptional != (c.AuthorizationID != "") || (exceptional && c.TenantID == "") {
 		return "", errors.New("the scope and the authorization belong to the token of a support access, which needs both and a tenant")
 	}

@@ -30,7 +30,15 @@ const (
 	PasswordChangeAccess = "password-change"
 	// ExceptionalAccess marks the token of a support access of the Platform Administrator to one tenant (ADR-004 D5).
 	ExceptionalAccess = "exceptional"
+	// EmergencyAccess marks the token of an emergency access, which the Platform Administrator opens alone (HU-SEC-007 part B, ADR-004 D5).
+	EmergencyAccess = "emergency"
 )
+
+// IsSupportAccess tells whether the mark is one of the two tokens of an access of the Platform Administrator to one tenant: the one that a
+// Tenant Administrator authorized and the emergency one. Both carry a tenant, a scope and the id of their authorization.
+func IsSupportAccess(access string) bool {
+	return access == ExceptionalAccess || access == EmergencyAccess
+}
 
 // ErrServiceName is a name that the services would refuse as a subject.
 var ErrServiceName = errors.New("a service name is 1 to 100 characters with no space at its ends and no control character")
@@ -103,6 +111,16 @@ func Service(name string, life time.Duration, now time.Time) (Claims, error) {
 // Exceptional is the token of a support access: the Platform Administrator for one tenant, the approved areas as the scope, the id of the
 // authorization and an end equal to the end of the access, never later than 24 hours from now. It has no special permission and no renewal.
 func Exceptional(platformAdministratorID, tenantID string, scope []string, authorizationID string, ends, now time.Time) (Claims, error) {
+	return supportToken(ExceptionalAccess, platformAdministratorID, tenantID, scope, authorizationID, ends, now)
+}
+
+// Emergency is the token of an emergency access: the same claims and the same limits as the one of a support access, with its own mark so that a
+// service can tell who authorized it (HU-SEC-007 part B). The scope may carry SENSITIVE.
+func Emergency(platformAdministratorID, tenantID string, scope []string, authorizationID string, ends, now time.Time) (Claims, error) {
+	return supportToken(EmergencyAccess, platformAdministratorID, tenantID, scope, authorizationID, ends, now)
+}
+
+func supportToken(access, platformAdministratorID, tenantID string, scope []string, authorizationID string, ends, now time.Time) (Claims, error) {
 	if !plainText(platformAdministratorID) || !plainText(tenantID) || !plainText(authorizationID) || len(scope) == 0 {
 		return Claims{}, ErrExceptionalClaims
 	}
@@ -114,7 +132,7 @@ func Exceptional(platformAdministratorID, tenantID string, scope []string, autho
 	if !ends.After(now) || ends.After(now.Add(MaxExceptionalLife)) {
 		return Claims{}, ErrExceptionalLife
 	}
-	c := claims(platformAdministratorID, tenantID, []string{"PLATFORM_ADMINISTRATOR"}, nil, ExceptionalAccess, now, ends.Sub(now))
+	c := claims(platformAdministratorID, tenantID, []string{"PLATFORM_ADMINISTRATOR"}, nil, access, now, ends.Sub(now))
 	c.Scope, c.AuthorizationID = append([]string{}, scope...), authorizationID
 	return c, nil
 }
