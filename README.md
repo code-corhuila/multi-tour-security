@@ -78,7 +78,7 @@ sh db/tests/db-ci.sh         # the schema from empty, rerun, rollback and rebuil
 Run beside the server, with the same binary and the variables exported in the shell (the binary does not read `.env` itself): `security <command>`.
 
 - `bootstrap-platform-admin` makes the first Platform Administrator, once. It reads `PLATFORM_ADMIN_EMAIL` and `DATABASE_URL`, takes the temporary password from the first line of the console (never from an argument or a variable) and does nothing if the platform already has an Administrator.
-- `issue-service-token <name> [duration]` prints one line, the token of a worker or a saga: `sub` is the name, role `SERVICE`, no tenant. It needs only `JWT_PRIVATE_KEY_FILE`. The duration is a Go duration between 1 minute and 30 days (24 hours by default). Keep the token as a secret of the environment; never version it.
+- `issue-service-token <name> [duration]` prints one line, the token of a worker or a saga: `sub` is the name, role `SERVICE`, no tenant. It needs only `JWT_PRIVATE_KEY_FILE`. The duration is a Go duration between 1 minute and 90 days (24 hours by default; ADR-004 D5 asks for 90 days in each environment). Keep the token as a secret of the environment; never version it.
 
 ## Still to come
 
