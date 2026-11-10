@@ -42,7 +42,7 @@ func TestI_AnEmergencyOpeningWritesItsFactWithItAndTheFirstTokenWritesNoSecond(t
 	payload, _ := got[0]["payload"].(map[string]any)
 	if got[0]["aggregateId"] != made.ID || got[0]["actorId"] != root || got[0]["tenantId"] != tenant || got[0]["correlationId"] != "corr-emergency-1" ||
 		payload["basis"] != "EMERGENCY" || payload["authorizationId"] != made.ID || payload["includesSensitiveData"] != true || payload["statement"] != "No Administrator can sign in" ||
-		payload["sensitiveReason"] == "" || payload["expiresAt"] != "2026-10-10T14:00:00Z" {
+		payload["sensitiveReason"] == "" || payload["expiresAt"] != "2026-10-10T14:00:00.000000Z" {
 		t.Fatalf("fact = %v", got[0])
 	}
 	// the token is taken later: the access is already open, so no second fact is written

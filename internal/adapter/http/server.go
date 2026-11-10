@@ -84,6 +84,9 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 	if s.userLister != nil {
 		mux.Handle("GET /api/v1/security/users", s.protect(s.requireTenantAdministrator(http.HandlerFunc(s.listInternalUsers))))
 	}
+	if s.emergencyAccess != nil {
+		mux.Handle("POST /api/v1/security/platform-emergency-accesses", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.openEmergencyAccess))))
+	}
 	if s.supportRequests != nil {
 		mux.Handle("POST /api/v1/security/platform-support-accesses", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.askForSupportAccess))))
 		mux.Handle("GET /api/v1/security/platform-support-accesses", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.listPlatformSupportAccesses))))
@@ -150,6 +153,7 @@ type server struct {
 	internalUsers    AccountCreator
 	userLister       UserLister
 	supportRequests  SupportRequester
+	emergencyAccess  EmergencyOpener
 	supportDecisions SupportDecider
 	supportSessions  SupportSessionService
 	permissions      PermissionChanger
