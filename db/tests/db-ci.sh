@@ -439,6 +439,25 @@ psql_admin -c "CREATE EXTENSION IF NOT EXISTS pgcrypto" \
            -c "ALTER ROLE security_app SET search_path = security" \
            -c "CREATE SCHEMA other_domain" -c "CREATE TABLE other_domain.probe (id int)" >/dev/null || exit 1
 
+# ---- HU-SEC-007 part B (spec 010, task SEC10-02): the emergency access reuses support_access and adds its basis, its statement and the sensitive data
+an_emergency_access_keeps_its_basis_its_statement_and_its_sensitive_reason() {
+  clean || return 1; psql_admin -c "$(identity NULL root@example.com)" >/dev/null || return 1
+  id=$(psql_admin -c "SELECT identity_id FROM security.identity LIMIT 1")
+  base="INSERT INTO security.support_access (tenant_id, requested_by, request_key, reason, areas, hours, status, requested_at"
+  psql_admin -c "$base) VALUES ('$T1', '$id', 'key-part-a-1', 'r', ARRAY['CASH'], 4, 'PENDING', now())" >/dev/null || return 1
+  [ "$(psql_admin -c "SELECT basis || ':' || sensitive FROM security.support_access")" = "TENANT_AUTHORIZATION:false" ] || { echo "an old row must read as an authorized access, not sensitive"; return 1; }
+  e="$base, basis, statement, sensitive, sensitive_reason"
+  refused chk_support_access_basis "$e) VALUES ('$T1', '$id', 'key-emergency-1', 'r', ARRAY['CASH'], 4, 'APPROVED', now(), 'OTHER', NULL, false, NULL)" || return 1
+  refused chk_support_access_emergency_statement "$e) VALUES ('$T1', '$id', 'key-emergency-2', 'r', ARRAY['CASH'], 4, 'APPROVED', now(), 'EMERGENCY', NULL, false, NULL)" || return 1
+  refused chk_support_access_emergency_statement "$base, statement) VALUES ('$T1', '$id', 'key-emergency-3', 'r', ARRAY['CASH'], 4, 'PENDING', now(), 'a statement of an authorized access')" || return 1
+  refused chk_support_access_sensitive_reason "$e) VALUES ('$T1', '$id', 'key-emergency-4', 'r', ARRAY['CASH'], 4, 'APPROVED', now(), 'EMERGENCY', 's', true, NULL)" || return 1
+  refused chk_support_access_sensitive_reason "$e) VALUES ('$T1', '$id', 'key-emergency-5', 'r', ARRAY['CASH'], 4, 'APPROVED', now(), 'EMERGENCY', 's', false, 'a reason without the flag')" || return 1
+  refused chk_support_access_sensitive_emergency "$base, sensitive, sensitive_reason) VALUES ('$T1', '$id', 'key-emergency-6', 'r', ARRAY['CASH'], 4, 'PENDING', now(), true, 'only an emergency may be sensitive')" || return 1
+  refused chk_support_access_emergency_decider "$base, decided_by, basis, statement) VALUES ('$T1', '$id', 'key-emergency-7', 'r', ARRAY['CASH'], 4, 'APPROVED', now(), '$id', 'EMERGENCY', 's')" || return 1
+  psql_admin -c "$e) VALUES ('$T1', '$id', 'key-emergency-8', 'r', ARRAY['CASH'], 4, 'APPROVED', now(), 'EMERGENCY', 's', true, 'the medical record of the incident')" >/dev/null || return 1
+  [ "$(psql_admin -c "SELECT basis || ':' || statement || ':' || sensitive || ':' || sensitive_reason FROM security.support_access WHERE request_key = 'key-emergency-8'")" = "EMERGENCY:s:true:the medical record of the incident" ] || { echo "an emergency access did not keep what it was given"; return 1; }
+}
+
 check "I·db_ci_builds_from_empty" lb update
 check "I·db_ci_second_update_changes_nothing" second_update_changes_nothing
 check "I·security_app_writes_only_its_schema" writes_only_its_schema
@@ -467,6 +486,7 @@ check "I·the_permissions_of_a_user_are_the_four_and_keep_who_and_when" the_perm
 check "I·a_tenant_enables_only_the_three_optional_roles_once_each" a_tenant_enables_only_the_three_optional_roles_once_each
 check "I·the_app_user_writes_the_permissions_and_the_optional_roles" the_app_user_writes_the_permissions_and_the_optional_roles
 check "I·a_tenant_with_existing_managers_starts_with_manager_enabled" a_tenant_with_existing_managers_starts_with_manager_enabled
+check "I·an_emergency_access_keeps_its_basis_its_statement_and_its_sensitive_reason" an_emergency_access_keeps_its_basis_its_statement_and_its_sensitive_reason
 # a pending account, a link row, a verified moment and a commercial name exist when the rollback runs, which must still
 # leave the instance empty
 clean
