@@ -68,7 +68,7 @@ type supportAccessBody struct {
 
 func toSupportAccessBody(a supportaccess.Access) supportAccessBody {
 	return supportAccessBody{
-		SupportAccessID: a.ID, TenantID: a.TenantID, Status: string(a.Status), Reason: a.Reason, Areas: a.Scope(), Hours: a.Hours,
+		SupportAccessID: a.ID, TenantID: a.TenantID, Status: string(a.Status), Reason: a.Reason, Areas: a.AreaNames(), Hours: a.Hours,
 		RequestedBy: a.RequestedBy, RequestedAt: instant(a.RequestedAt), DecidedBy: a.DecidedBy, DecidedAt: instant(a.DecidedAt),
 		DecisionReason: a.DecisionReason, ExpiresAt: instant(a.ExpiresAt), OpenedAt: instant(a.OpenedAt), ClosedAt: instant(a.ClosedAt),
 		ClosedReason: a.ClosedReason,
