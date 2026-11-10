@@ -30,7 +30,7 @@ const (
 // ErrServiceName is a name that the services would refuse as a subject.
 var ErrServiceName = errors.New("a service name is 1 to 100 characters with no space at its ends and no control character")
 
-// ErrServiceLife is a service token asked for a life under a minute or over 30 days.
+// ErrServiceLife is a service token asked for a life under a minute or over 90 days.
 var ErrServiceLife = errors.New("a service token lasts from one minute to 90 days")
 
 // Claims are the claims of an access token. TenantID is empty for the platform and for a service.
