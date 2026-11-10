@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -57,14 +58,35 @@ func (s *SupportAccesses) Open(ctx context.Context, requestedBy, id string, now 
 	return a, found, err
 }
 
+// endNotices is the statement that requests the end notice of an emergency access, one per active Tenant Administrator of its tenant (HU-SEC-007 part C,
+// spec 011): the closing and the expiry write it with the same text, from the rows they close. An authorized access writes none (RN-SEC-011-02), and
+// neither the statement nor the justification of the sensitive data is in it (RN-SEC-011-04). rows is the CTE of the closed rows, with the columns it reads.
+func endNotices(rows, endedAt, correlation, occurredAt string) string {
+	return strings.NewReplacer("{rows}", rows, "{endedAt}", endedAt, "{correlation}", correlation, "{occurredAt}", occurredAt).Replace(`
+INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, actor_id, payload, correlation_id, occurred_at)
+SELECT e.tenant_id, 'EmergencyAccessNoticeRequested', e.support_access_id, e.requested_by,
+    jsonb_build_object('kind', 'CLOSED', 'recipientEmail', r.email_normalized,
+        'tenantName', COALESCE((SELECT c.commercial_name FROM security.tenant_copy c WHERE c.tenant_id = e.tenant_id), 'Multitour'),
+        'platformAdministrator', (SELECT p.email_normalized FROM security.identity p WHERE p.identity_id = e.requested_by),
+        'reason', e.reason, 'scope', to_jsonb(e.areas), 'includesSensitiveData', e.sensitive,
+        'startedAt', to_char(e.opened_at AT TIME ZONE 'UTC', ` + utcTime + `), 'endedAt', to_char({endedAt} AT TIME ZONE 'UTC', ` + utcTime + `),
+        'authorizationId', e.support_access_id),
+    {correlation}, {occurredAt}
+FROM {rows} e
+JOIN security.identity r ON r.tenant_id = e.tenant_id AND r.identity_status = 'ACTIVE'
+JOIN security.membership m ON m.identity_id = r.identity_id AND m.membership_status = 'ACTIVE'
+JOIN security.membership_role mr ON mr.membership_id = m.membership_id AND mr.role = 'TENANT_ADMINISTRATOR' AND mr.role_status = 'ACTIVE'
+WHERE e.basis = 'EMERGENCY' AND e.opened_at IS NOT NULL`)
+}
+
 // One statement: the access closes while it is approved and its hours are not over, the sessions of the Platform Administrator are cut and
 // the fact of the cut is written, and, if the access had been opened, the fact of its closing; or none of it. A never opened access has no
 // closing fact: nothing opened, so nothing closes.
-const closeSupportAccess = `
+var closeSupportAccess = `
 WITH closed AS (
     UPDATE security.support_access SET status = 'CLOSED', closed_at = $2::timestamptz, closed_reason = $3
     WHERE support_access_id = $1::uuid AND requested_by = $5::uuid AND status = 'APPROVED' AND expires_at > $2::timestamptz
-    RETURNING support_access_id, tenant_id, requested_by, opened_at
+    RETURNING support_access_id, tenant_id, requested_by, opened_at, reason, areas, sensitive, basis
 ), cut AS (
     UPDATE security.identity i SET sessions_revoked_from = GREATEST(COALESCE(i.sessions_revoked_from, $2::timestamptz), $2::timestamptz)
     FROM closed WHERE i.identity_id = closed.requested_by
@@ -83,6 +105,7 @@ WITH closed AS (
                'closedAt', to_char($2::timestamptz AT TIME ZONE 'UTC', ` + utcTime + `), 'endedBy', 'CLOSED_EARLY', 'reason', $3::text),
            $4, $2::timestamptz
     FROM closed WHERE closed.opened_at IS NOT NULL
+), notices AS (` + endNotices("closed", "$2::timestamptz", "$4", "$2::timestamptz") + `
 )
 SELECT count(*) FROM closed`
 
@@ -100,20 +123,21 @@ const expiryCorrelationID = "support-access-expiry"
 
 // One statement: the approved accesses whose hours are over (of one author, or of one tenant) become expired, and the ones that had been
 // opened write the fact of their closing, dated at the end of their hours; or none. Asking again matches nothing.
-const expireApproved = `
+var expireApproved = `
 WITH expired AS (
     UPDATE security.support_access SET status = 'EXPIRED', closed_at = expires_at
     WHERE status = 'APPROVED' AND expires_at <= $1::timestamptz
       AND ($2 = '' OR requested_by = $2::uuid) AND ($3 = '' OR tenant_id = $3::uuid)
-    RETURNING support_access_id, tenant_id, requested_by, opened_at, expires_at
-)
-INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, actor_id, payload, correlation_id, occurred_at)
-SELECT tenant_id, 'PlatformExceptionalAccessClosed', support_access_id, requested_by,
-       jsonb_build_object('authorizationId', support_access_id, 'platformAdministratorId', requested_by,
-           'openedAt', to_char(opened_at AT TIME ZONE 'UTC', ` + utcTime + `),
-           'closedAt', to_char(expires_at AT TIME ZONE 'UTC', ` + utcTime + `), 'endedBy', 'EXPIRED'),
-       '` + expiryCorrelationID + `', expires_at
-FROM expired WHERE opened_at IS NOT NULL`
+    RETURNING support_access_id, tenant_id, requested_by, opened_at, expires_at, reason, areas, sensitive, basis
+), ended AS (
+    INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, actor_id, payload, correlation_id, occurred_at)
+    SELECT tenant_id, 'PlatformExceptionalAccessClosed', support_access_id, requested_by,
+           jsonb_build_object('authorizationId', support_access_id, 'platformAdministratorId', requested_by,
+               'openedAt', to_char(opened_at AT TIME ZONE 'UTC', ` + utcTime + `),
+               'closedAt', to_char(expires_at AT TIME ZONE 'UTC', ` + utcTime + `), 'endedBy', 'EXPIRED'),
+           '` + expiryCorrelationID + `', expires_at
+    FROM expired WHERE opened_at IS NOT NULL
+)` + endNotices("expired", "e.expires_at", "'"+expiryCorrelationID+"'", "e.expires_at")
 
 // ExpireApproved marks as expired the approved accesses that ran out, of one author or of one tenant (the other filter is empty).
 func (s *SupportAccesses) ExpireApproved(ctx context.Context, requestedBy, tenantID string, now time.Time) error {
