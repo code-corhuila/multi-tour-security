@@ -226,12 +226,18 @@ func (a Access) Close(reason string, now time.Time) (Access, error) {
 	return a, nil
 }
 
-// Scope is the claim of the token: the approved areas, as a copy that the caller may change.
-func (a Access) Scope() []string {
-	scope := make([]string, len(a.Areas))
+// AreaNames are the approved areas, as a copy that the caller may change. It is what is stored and shown; the scope of the token may add more.
+func (a Access) AreaNames() []string {
+	names := make([]string, len(a.Areas))
 	for i, area := range a.Areas {
-		scope[i] = string(area)
+		names[i] = string(area)
 	}
+	return names
+}
+
+// Scope is the claim of the token: the approved areas and, only for a sensitive emergency, the word SENSITIVE.
+func (a Access) Scope() []string {
+	scope := a.AreaNames()
 	if a.Sensitive {
 		scope = append(scope, SensitiveScope)
 	}

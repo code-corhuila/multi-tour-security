@@ -53,7 +53,7 @@ RETURNING ` + supportColumns
 
 // Create stores the request, or returns the one the author's key already made.
 func (s *SupportAccesses) Create(ctx context.Context, a supportaccess.Access, key string) (supportaccess.Access, bool, error) {
-	made, err := scanAccess(s.pool.QueryRow(ctx, insertSupportAccess, a.TenantID, a.RequestedBy, key, a.Reason, a.Scope(), a.Hours, a.RequestedAt))
+	made, err := scanAccess(s.pool.QueryRow(ctx, insertSupportAccess, a.TenantID, a.RequestedBy, key, a.Reason, a.AreaNames(), a.Hours, a.RequestedAt))
 	if err == nil {
 		return made, true, nil
 	}
