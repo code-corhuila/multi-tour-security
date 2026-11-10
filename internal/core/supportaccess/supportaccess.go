@@ -69,15 +69,6 @@ var (
 	ErrOpenAccessExists           = errors.New("the Platform Administrator already has an open access to that tenant")
 )
 
-// AreaNames lists the areas of the closed list, as a copy that the caller may change.
-func AreaNames() []string {
-	names := make([]string, len(areas))
-	for i, a := range areas {
-		names[i] = string(a)
-	}
-	return names
-}
-
 // ParseAreas turns names into areas: at least one, each of the list and none repeated. The order given is kept.
 func ParseAreas(names []string) ([]Area, error) {
 	if len(names) == 0 || len(names) > len(areas) {

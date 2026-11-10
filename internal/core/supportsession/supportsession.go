@@ -16,9 +16,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/validate"
 )
 
-// ErrInvalid and FieldError are those every use case shares.
-var ErrInvalid = validate.ErrInvalid
-
+// FieldError is the one every use case shares.
 type FieldError = validate.FieldError
 
 // ErrNotFound is an access that does not exist or that another administrator asked for: from here it is the same answer.
