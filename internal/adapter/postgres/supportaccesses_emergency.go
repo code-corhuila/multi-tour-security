@@ -37,7 +37,7 @@ VALUES ($1::uuid, 'PlatformExceptionalAccessOpened', $2::uuid, $3::uuid,
     || CASE WHEN $7::boolean THEN jsonb_build_object('sensitiveReason', $10::text) ELSE '{}'::jsonb END,
     $11, $8::timestamptz)`
 
-// One notice per active Tenant Administrator of the tenant: the accounts of that tenant, active, with an active membership and the role. Only what the
+// One notice per active Tenant Administrator of the tenant: the accounts of that tenant, active, with an active membership and an active role. Only what the
 // notice may say travels: never the statement nor the justification of the sensitive data (RN-SEC-011-01, -04). A tenant with none writes nothing.
 const emergencyOpeningNotices = `
 INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, actor_id, payload, correlation_id, occurred_at)
@@ -50,7 +50,7 @@ SELECT $1::uuid, 'EmergencyAccessNoticeRequested', $2::uuid, $3::uuid,
     $8, $7::timestamptz
 FROM security.identity r
 JOIN security.membership m ON m.identity_id = r.identity_id AND m.membership_status = 'ACTIVE'
-JOIN security.membership_role mr ON mr.membership_id = m.membership_id AND mr.role = 'TENANT_ADMINISTRATOR'
+JOIN security.membership_role mr ON mr.membership_id = m.membership_id AND mr.role = 'TENANT_ADMINISTRATOR' AND mr.role_status = 'ACTIVE'
 WHERE r.tenant_id = $1::uuid AND r.identity_status = 'ACTIVE'`
 
 // OpenEmergency stores the emergency access, writes the fact that it opened and the notices of the opening in one transaction, or returns the access that the key of its author
