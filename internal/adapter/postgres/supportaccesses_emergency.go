@@ -37,7 +37,23 @@ VALUES ($1::uuid, 'PlatformExceptionalAccessOpened', $2::uuid, $3::uuid,
     || CASE WHEN $7::boolean THEN jsonb_build_object('sensitiveReason', $10::text) ELSE '{}'::jsonb END,
     $11, $8::timestamptz)`
 
-// OpenEmergency stores the emergency access and writes the fact that it opened in one transaction, or returns the access that the key of its author
+// One notice per active Tenant Administrator of the tenant: the accounts of that tenant, active, with an active membership and an active role. Only what the
+// notice may say travels: never the statement nor the justification of the sensitive data (RN-SEC-011-01, -04). A tenant with none writes nothing.
+const emergencyOpeningNotices = `
+INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, actor_id, payload, correlation_id, occurred_at)
+SELECT $1::uuid, 'EmergencyAccessNoticeRequested', $2::uuid, $3::uuid,
+    jsonb_build_object('kind', 'OPENED', 'recipientEmail', r.email_normalized,
+        'tenantName', COALESCE((SELECT c.commercial_name FROM security.tenant_copy c WHERE c.tenant_id = $1::uuid), 'Multitour'),
+        'platformAdministrator', (SELECT p.email_normalized FROM security.identity p WHERE p.identity_id = $3::uuid),
+        'reason', $4::text, 'scope', to_jsonb($5::text[]), 'includesSensitiveData', $6::boolean,
+        'startedAt', to_char($7::timestamptz AT TIME ZONE 'UTC', ` + utcTime + `), 'authorizationId', $2::uuid),
+    $8, $7::timestamptz
+FROM security.identity r
+JOIN security.membership m ON m.identity_id = r.identity_id AND m.membership_status = 'ACTIVE'
+JOIN security.membership_role mr ON mr.membership_id = m.membership_id AND mr.role = 'TENANT_ADMINISTRATOR' AND mr.role_status = 'ACTIVE'
+WHERE r.tenant_id = $1::uuid AND r.identity_status = 'ACTIVE'`
+
+// OpenEmergency stores the emergency access, writes the fact that it opened and the notices of the opening in one transaction, or returns the access that the key of its author
 // already made. An access to the same tenant that is still open refuses it; one whose hours are over is expired first, with its closing fact.
 func (s *SupportAccesses) OpenEmergency(ctx context.Context, a supportaccess.Access, key, correlationID string) (supportaccess.Access, bool, error) {
 	tx, err := s.pool.Begin(ctx)
@@ -80,6 +96,10 @@ func (s *SupportAccesses) OpenEmergency(ctx context.Context, a supportaccess.Acc
 	}
 	if _, err := tx.Exec(ctx, emergencyOpenedFact, made.TenantID, made.ID, made.RequestedBy, made.Reason, made.Statement, made.AreaNames(), made.Sensitive,
 		made.OpenedAt, made.ExpiresAt, made.SensitiveReason, correlationID); err != nil {
+		return supportaccess.Access{}, false, err
+	}
+	if _, err := tx.Exec(ctx, emergencyOpeningNotices, made.TenantID, made.ID, made.RequestedBy, made.Reason, made.AreaNames(), made.Sensitive,
+		made.OpenedAt, correlationID); err != nil {
 		return supportaccess.Access{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
