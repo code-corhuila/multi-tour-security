@@ -146,3 +146,27 @@ func TestI_AnAuthorizedRequestIsReadBackWithTheAuthorizationBasisAndNoStatement(
 		t.Fatalf("request = %+v", made)
 	}
 }
+
+// The lock is of the pair (tenant, author) and the key is unique per author, so the same key at once for two tenants meets only the unique key:
+// both must get the one access that won, never an error (review of spec 010, finding H1).
+func TestI_TheSameKeyAtOnceForTwoTenantsOpensOneAndBothGetIt(t *testing.T) {
+	store, pool, root := supportSetup(t)
+	start := make(chan struct{})
+	type result struct {
+		id  string
+		err error
+	}
+	results := make(chan result, 2)
+	for _, tenantID := range []string{tenant, otherTenant} {
+		go func() {
+			<-start
+			got, _, err := store.OpenEmergency(ctx, emergencyAt(t, root, tenantID, base, false), "emerg-0007-same", "corr-7")
+			results <- result{got.ID, err}
+		}()
+	}
+	close(start)
+	a, b := <-results, <-results
+	if a.err != nil || b.err != nil || len(a.id) != 36 || a.id != b.id || rows(t, pool, "support_access") != 1 || len(facts(t, pool, "PlatformExceptionalAccessOpened")) != 1 {
+		t.Fatalf("%+v %+v rows %d facts %d", a, b, rows(t, pool, "support_access"), len(facts(t, pool, "PlatformExceptionalAccessOpened")))
+	}
+}
