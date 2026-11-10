@@ -66,6 +66,15 @@ func (s *SupportAccesses) OpenEmergency(ctx context.Context, a supportaccess.Acc
 	}
 	made, err := scanAccess(tx.QueryRow(ctx, insertEmergency, a.TenantID, a.RequestedBy, key, a.Reason, a.AreaNames(), a.Hours, a.RequestedAt, a.ExpiresAt,
 		a.Statement, a.Sensitive, a.SensitiveReason))
+	if errors.Is(err, pgx.ErrNoRows) {
+		// the lock is of the pair, the key is of the author: the same key for another tenant, or from the ask route, was committed first and the
+		// insert waited for it (RN-SEC-010-08); the access that won is the answer
+		prior, found, findErr := s.FindByKey(ctx, a.RequestedBy, key)
+		if findErr != nil || !found {
+			return supportaccess.Access{}, false, errors.Join(err, findErr)
+		}
+		return prior, false, nil
+	}
 	if err != nil {
 		return supportaccess.Access{}, false, err
 	}
