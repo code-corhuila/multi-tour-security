@@ -52,3 +52,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: security-ddl-indexes-004
+      author: Molina211
+      labels: "HU-SEC-003,ddl,indexes"
+      comment: "The unique hash of a link and the count of the links of an account (HU-SEC-003, plan D-03)."
+      changes:
+        - sqlFile:
+            path: 004_create_email_verification_indexes.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/004_create_email_verification_indexes.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
