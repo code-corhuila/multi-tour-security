@@ -11,6 +11,8 @@ type rule struct {
 	temporary bool
 	// activeTenant asks the copy of the tenant; the saga that makes the first Administrator is the authority instead
 	activeTenant bool
+	// pending makes the account wait for its e-mail to be verified: it gets a link and sends it
+	pending bool
 	// createdBy is recorded with the account, followed by "/" and the actor when the kind has one
 	createdBy string
 	hasActor  bool
@@ -20,7 +22,7 @@ type rule struct {
 func rules(k Kind) (rule, bool) {
 	switch k {
 	case Customer:
-		return rule{scope: "customer", role: "FINAL_CUSTOMER", selfService: true, activeTenant: true, createdBy: "customer"}, true
+		return rule{scope: "customer", role: "FINAL_CUSTOMER", selfService: true, activeTenant: true, pending: true, createdBy: "customer"}, true
 	case InternalUser:
 		return rule{scope: "user", temporary: true, activeTenant: true, createdBy: "tenant-administrator", hasActor: true}, true
 	case FirstAdministrator:

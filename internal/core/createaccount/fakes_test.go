@@ -1,7 +1,10 @@
 package createaccount_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"io"
 	"time"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/account"
@@ -72,9 +75,13 @@ func (f *fakeRegistry) Create(_ context.Context, n port.NewAccount, scope, key s
 	}
 	f.created = append(f.created, n)
 	f.scopes = append(f.scopes, scope)
+	status := account.Active
+	if n.Pending {
+		status = account.Pending
+	}
 	r := port.Registered{
 		Account: account.Account{ID: "acc-new", TenantID: n.TenantID, EmailNormalized: n.EmailNormalized,
-			PasswordHash: n.PasswordHash, Status: account.Active, TemporaryUntil: n.TemporaryUntil},
+			PasswordHash: n.PasswordHash, Status: status, TemporaryUntil: n.TemporaryUntil},
 		Role: n.Role, FullName: n.FullName, Phone: n.Phone,
 	}
 	if f.keys == nil {
@@ -98,23 +105,59 @@ func (f *fakeHasher) Hash(pw string) (string, error) {
 	return hashPrefix + pw, nil
 }
 
+// fakeMailer keeps every e-mail it was asked to send; err is the answer of the next sends.
+type fakeMailer struct {
+	sent []port.Mail
+	err  error
+}
+
+func (f *fakeMailer) SendVerification(_ context.Context, m port.Mail) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.sent = append(f.sent, m)
+	return nil
+}
+
+// fakeVerifications keeps what the use case reports about a failed send; the rest of the port is not used here.
+type fakeVerifications struct {
+	port.Verifications
+	failedHashes []string
+	causes       []string
+}
+
+func (f *fakeVerifications) MarkSendFailed(_ context.Context, hash string, _ time.Time, cause string) error {
+	f.failedHashes = append(f.failedHashes, hash)
+	f.causes = append(f.causes, cause)
+	return nil
+}
+
+// the same 32 bytes every time, so a test knows the link without reading it from the mail
+func fixedRandom() io.Reader { return bytes.NewReader(bytes.Repeat([]byte{7}, 32*10)) }
+
+var errSMTP = errors.New("smtp: connection refused")
+
 type world struct {
-	tenants  *fakeTenants
-	accounts *fakeAccounts
-	registry *fakeRegistry
-	hasher   *fakeHasher
-	service  *createaccount.Service
+	tenants       *fakeTenants
+	accounts      *fakeAccounts
+	registry      *fakeRegistry
+	hasher        *fakeHasher
+	mailer        *fakeMailer
+	verifications *fakeVerifications
+	service       *createaccount.Service
 }
 
 func newWorld() *world {
 	w := &world{
-		tenants:  &fakeTenants{copies: map[string]tenant.Copy{tenantID: {TenantID: tenantID, Identifier: "travesia", Status: tenant.Active}}},
-		accounts: &fakeAccounts{byKey: map[string]account.Account{}},
-		registry: &fakeRegistry{},
-		hasher:   &fakeHasher{},
+		tenants:       &fakeTenants{copies: map[string]tenant.Copy{tenantID: {TenantID: tenantID, Identifier: "travesia", Status: tenant.Active}}},
+		accounts:      &fakeAccounts{byKey: map[string]account.Account{}},
+		registry:      &fakeRegistry{},
+		hasher:        &fakeHasher{},
+		mailer:        &fakeMailer{},
+		verifications: &fakeVerifications{},
 	}
 	w.service = &createaccount.Service{Tenants: w.tenants, Accounts: w.accounts, Registry: w.registry, Hasher: w.hasher,
-		Clock: func() time.Time { return now }}
+		Clock: func() time.Time { return now }, Verifications: w.verifications, Mailer: w.mailer, Random: fixedRandom()}
 	return w
 }
 

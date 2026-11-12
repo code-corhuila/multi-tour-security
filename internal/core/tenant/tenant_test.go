@@ -37,3 +37,12 @@ func TestD_OnlyAnActiveCopyIsActiveAndAnUnknownOrEmptyOneNever(t *testing.T) {
 		t.Error("a zero copy is not active")
 	}
 }
+
+func TestD_TheDisplayNameIsTheCommercialNameOrThePlatformsOwn(t *testing.T) {
+	if got := (tenant.Copy{CommercialName: "Acme Tours"}).DisplayName(); got != "Acme Tours" {
+		t.Fatalf("display name = %q", got)
+	}
+	if got := (tenant.Copy{}).DisplayName(); got != "Multitour" {
+		t.Fatalf("display name = %q, want the platform's", got)
+	}
+}

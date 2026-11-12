@@ -140,7 +140,7 @@ func TestA_AnInactiveTenantCreatesNoAccountAndAnUnknownOneIsNotFound(t *testing.
 	nothingWritten(t, w)
 }
 
-func TestA_ACustomerAccountIsActiveWithTheRoleFinalCustomerAndNoTemporaryCredential(t *testing.T) {
+func TestA_ACustomerAccountIsPendingWithTheRoleFinalCustomerAndNoTemporaryCredential(t *testing.T) {
 	w := newWorld()
 	got, created, err := w.service.Create(ctx, customer())
 	if err != nil || !created {
@@ -153,8 +153,8 @@ func TestA_ACustomerAccountIsActiveWithTheRoleFinalCustomerAndNoTemporaryCredent
 	if n.FullName != "Ana Pérez" || n.Phone != "+57 300 123 4567" || n.CreatedBy != "customer" {
 		t.Fatalf("profile = %+v", n)
 	}
-	if got.Account.Status != account.Active || got.Account.UsesTemporaryCredential(now) {
-		t.Fatalf("the customer must be active with an ordinary password: %+v", got.Account)
+	if got.Account.Status != account.Pending || !n.Pending || got.Account.UsesTemporaryCredential(now) {
+		t.Fatalf("the customer must be pending with an ordinary password: %+v", got.Account)
 	}
 	if n.PasswordHash != hashPrefix+goodPass {
 		t.Fatal("only the hash of the password is handed to the store")
