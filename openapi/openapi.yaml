@@ -244,7 +244,7 @@ paths:
         and its confirmation, which must match, follow the policy; the password is a temporary credential of 72 hours that
         only allows choosing another, it is stored only as a hash and is never returned. The tenant must be ACTIVE. An
         e-mail that already has an account in the tenant is 422 with the reason in details: an internal user, an inactive
-        internal user who can be reactivated, or a Final Customer account. A repeat with the same Idempotency-Key answers
+        internal user who can be reactivated, or a Final Customer account. An optional role (MANAGER, ACCOUNTANT, ANALYST) that the tenant has not enabled is 422 too (HU-SEC-006). A repeat with the same Idempotency-Key answers
         200 with the user already created. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is
         accepted: a collaborator, a customer, the Platform Administrator and a temporary or restricted token get 403.
       operationId: createInternalUser
@@ -530,6 +530,109 @@ paths:
         "413":
           $ref: '#/components/responses/Error'
         "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/optional-roles:
+    get:
+      summary: The optional roles of the tenant and whether each is enabled
+      description: >
+        Always the three optional roles (MANAGER, ACCOUNTANT, ANALYST), in that order, with whether the tenant of the token enabled each
+        and who changed it and when (HU-SEC-006, AC5). A tenant starts with none enabled, except that one which already had users with a role
+        before HU-SEC-006 starts with that role enabled. Not paginated: the set is closed and the
+        route takes no parameter. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
+      operationId: listOptionalRoles
+      tags: [OptionalRoles]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The three optional roles of the tenant
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptionalRoleList'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/optional-roles/{role}/enablement:
+    post:
+      summary: Enable an optional role for the tenant
+      description: >
+        The Tenant Administrator enables MANAGER, ACCOUNTANT or ANALYST for their tenant (HU-SEC-006, AC5): from then on a user can be
+        registered with it. Enabling an enabled role is 422 INVALID_STATUS_TRANSITION; another role is 400. Who enabled it and when are
+        kept and OptionalRoleEnabled is written in the same transaction. The route reads no body. Only a token with the role
+        TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
+      operationId: enableOptionalRole
+      tags: [OptionalRoles]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalRolePath'
+      responses:
+        "200":
+          description: The optional role as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptionalRoleState'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/optional-roles/{role}/disablement:
+    post:
+      summary: Disable an optional role for the tenant
+      description: >
+        The Tenant Administrator disables an optional role of their tenant (HU-SEC-006, AC5). It is refused while an active user of the
+        tenant holds it (422 BUSINESS_RULE_VIOLATION): no operation takes a role away from a person. Disabling a disabled role is 422
+        INVALID_STATUS_TRANSITION; another role is 400. Who disabled it and when are kept and OptionalRoleDisabled is written in the
+        same transaction. The route reads no body. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is
+        accepted.
+      operationId: disableOptionalRole
+      tags: [OptionalRoles]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalRolePath'
+      responses:
+        "200":
+          description: The optional role as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptionalRoleState'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
           $ref: '#/components/responses/Error'
         "422":
           $ref: '#/components/responses/Error'
@@ -903,6 +1006,12 @@ components:
       schema:
         type: string
         format: uuid
+    OptionalRolePath:
+      name: role
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/OptionalRole'
     EventIdPath:
       name: eventId
       in: path
@@ -1191,6 +1300,30 @@ components:
       properties:
         permission:
           $ref: '#/components/schemas/SpecialPermission'
+    OptionalRole:
+      type: string
+      description: The roles a tenant may enable (PDR section 9)
+      enum: [MANAGER, ACCOUNTANT, ANALYST]
+    OptionalRoleState:
+      type: object
+      required: [role, enabled]
+      properties:
+        role:
+          $ref: '#/components/schemas/OptionalRole'
+        enabled:
+          type: boolean
+        changedAt: {type: string, format: date-time, description: When the role last changed; absent if it never did}
+        changedBy: {type: string, description: "The actor of the last change, as tenant-administrator/<accountId>; absent if it never changed"}
+    OptionalRoleList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/OptionalRoleState'
     StatusChangeRequest:
       type: object
       required: [reason]

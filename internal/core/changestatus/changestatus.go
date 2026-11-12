@@ -65,7 +65,7 @@ func (s *Service) change(ctx context.Context, r Request, to account.Status) (por
 		return port.Registered{}, errors.New("the status change has no correlation id")
 	}
 	return s.Store.ChangeStatus(ctx, port.StatusCommand{
-		TenantID: r.TenantID, AccountID: r.AccountID, To: to, By: "tenant-administrator/" + r.ActorID, ActorID: r.ActorID,
+		TenantID: r.TenantID, AccountID: r.AccountID, To: to, By: account.By(account.RoleTenantAdministrator, r.ActorID), ActorID: r.ActorID,
 		Reason: reason, CorrelationID: r.CorrelationID, Now: s.Clock(),
 	})
 }

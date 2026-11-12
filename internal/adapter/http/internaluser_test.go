@@ -173,6 +173,15 @@ func TestC_ARefusedEmailSaysWhoseItIs(t *testing.T) {
 	}
 }
 
+// HU-SEC-006, RN-SEC-005-12: an optional role the tenant has not enabled is a rule of the business, not a mistake of the caller.
+func TestC_ARoleTheTenantHasNotEnabledIs422AndDoesNotRepeatTheRole(t *testing.T) {
+	rec := postUser(usersHandler(&fakeCreator{err: port.ErrRoleNotEnabled}, io.Discard), administrator(t), "application/json", strings.Replace(userBody, "OPERATIONAL_COLLABORATOR", "MANAGER", 1), usersKey)
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"error":"BUSINESS_RULE_VIOLATION"`) || !strings.Contains(rec.Body.String(), "not enabled") ||
+		strings.Contains(rec.Body.String(), "MANAGER") {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestC_ATakenEmailWithNoReasonKeepsThePlainRefusal(t *testing.T) {
 	rec := postUser(usersHandler(&fakeCreator{err: port.ErrEmailTaken}, io.Discard), administrator(t), "application/json", userBody, usersKey)
 	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "already in use") {

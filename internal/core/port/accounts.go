@@ -28,4 +28,7 @@ type Accounts interface {
 	ChangePassword(ctx context.Context, id, hash string, now time.Time, correlationID string) error
 	// RolesOf lists the roles of the active membership, by name; an account with none has an empty list.
 	RolesOf(ctx context.Context, id string) ([]string, error)
+	// PermissionsOf lists the special permissions assigned to the account and held now, by name, of its active membership; an account
+	// with none has an empty list. The ones of a profile are not here: account.PermissionsFor adds them (HU-SEC-006, plan D-05).
+	PermissionsOf(ctx context.Context, id string) ([]string, error)
 }

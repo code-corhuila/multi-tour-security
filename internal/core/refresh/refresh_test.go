@@ -44,8 +44,10 @@ func (f *fakeSessions) RevokeAll(context.Context, string, time.Time, string) err
 type fakeAccounts struct {
 	byID     map[string]account.Account
 	roles    map[string][]string
+	assigned map[string][]string // the permissions assigned to each account and held now
 	findErr  error
 	rolesErr error
+	permErr  error
 }
 
 func (f *fakeAccounts) FindByEmail(context.Context, string, string) (account.Account, bool, error) {
@@ -64,6 +66,10 @@ func (f *fakeAccounts) ChangePassword(context.Context, string, string, time.Time
 }
 func (f *fakeAccounts) RolesOf(_ context.Context, id string) ([]string, error) {
 	return f.roles[id], f.rolesErr
+}
+
+func (f *fakeAccounts) PermissionsOf(_ context.Context, id string) ([]string, error) {
+	return f.assigned[id], f.permErr
 }
 
 type fakeTenants struct {

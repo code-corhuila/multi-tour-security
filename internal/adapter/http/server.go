@@ -88,6 +88,11 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 		mux.Handle("POST /api/v1/security/users/{accountId}/permission-grant", s.protect(s.requireTenantAdministrator(s.changePermission(s.permissions.Grant))))
 		mux.Handle("POST /api/v1/security/users/{accountId}/permission-removal", s.protect(s.requireTenantAdministrator(s.changePermission(s.permissions.Remove))))
 	}
+	if s.optionalRoles != nil {
+		mux.Handle("GET /api/v1/security/optional-roles", s.protect(s.requireTenantAdministrator(http.HandlerFunc(s.listOptionalRoles))))
+		mux.Handle("POST /api/v1/security/optional-roles/{role}/enablement", s.protect(s.requireTenantAdministrator(s.changeOptionalRole(s.optionalRoles.Enable, "enabling an optional role"))))
+		mux.Handle("POST /api/v1/security/optional-roles/{role}/disablement", s.protect(s.requireTenantAdministrator(s.changeOptionalRole(s.optionalRoles.Disable, "disabling an optional role"))))
+	}
 	if s.userStatus != nil {
 		mux.Handle("POST /api/v1/security/users/{accountId}/inactivation", s.protect(s.requireTenantAdministrator(s.changeStatus(s.userStatus.Inactivate))))
 		mux.Handle("POST /api/v1/security/users/{accountId}/reactivation", s.protect(s.requireTenantAdministrator(s.changeStatus(s.userStatus.Reactivate))))
@@ -124,6 +129,7 @@ type server struct {
 	internalUsers    AccountCreator
 	userLister       UserLister
 	permissions      PermissionChanger
+	optionalRoles    OptionalRoleManager
 	userStatus       UserStatusChanger
 	credentialIssuer CredentialIssuer
 

@@ -119,6 +119,7 @@ func TestC_AnAdministratorRegistersAUserWhoSignsInOnlyToChooseAPasswordAndThenHo
 func TestC_EachOfTheFiveRolesCanBeGivenAndAnythingElseIsRefusedWithNothingCreated(t *testing.T) {
 	s := newStack(t)
 	admin := s.administrator(t, tenantA, "admin@example.com")
+	s.enableRoles(t, admin, "MANAGER", "ACCOUNTANT", "ANALYST")
 	before := s.accountCount(t)
 	for i, role := range []string{"TENANT_ADMINISTRATOR", "OPERATIONAL_COLLABORATOR", "MANAGER", "ACCOUNTANT", "ANALYST"} {
 		email := strings.ToLower(role) + "@example.com"
@@ -144,6 +145,8 @@ func TestC_TheTenantIsAlwaysTheCredentialsAndARepeatOfTheKeyCreatesNothingNew(t 
 	s := newStack(t)
 	adminA := s.administrator(t, tenantA, "admin@example.com")
 	adminB := s.administrator(t, tenantB, "admin@example.com")
+	s.enableRoles(t, adminA, "MANAGER")
+	s.enableRoles(t, adminB, "MANAGER")
 	fields := userFields("luis@example.com", "MANAGER")
 	first := s.registerUser(t, adminA, "same-key-000001", fields)
 	repeat := s.registerUser(t, adminA, "same-key-000001", fields)

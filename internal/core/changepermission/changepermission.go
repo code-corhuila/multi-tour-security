@@ -82,7 +82,7 @@ func (s *Service) change(ctx context.Context, r Request, grant bool) (port.Regis
 		return port.Registered{}, ErrNotAssignable
 	}
 	// the actor is a Tenant Administrator because the route that calls this lets in no one else (plan D-07); the core does not check it
-	change := port.PermissionChange{TenantID: r.TenantID, AccountID: r.AccountID, Permission: r.Permission, By: "tenant-administrator/" + r.ActorID,
+	change := port.PermissionChange{TenantID: r.TenantID, AccountID: r.AccountID, Permission: r.Permission, By: account.By(account.RoleTenantAdministrator, r.ActorID),
 		ActorID: r.ActorID, ActorRole: account.RoleTenantAdministrator, CorrelationID: r.CorrelationID, Now: s.Clock()}
 	if grant {
 		return s.Store.Grant(ctx, change)

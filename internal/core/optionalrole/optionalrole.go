@@ -89,6 +89,6 @@ func (s *Service) change(r Request) (port.OptionalRoleChange, error) {
 		return port.OptionalRoleChange{}, errors.New("the change of an optional role has no usable correlation id")
 	}
 	// the actor is a Tenant Administrator because the route that calls this lets in no one else (plan D-07); the core does not check it
-	return port.OptionalRoleChange{TenantID: r.TenantID, Role: r.Role, By: "tenant-administrator/" + r.ActorID, ActorID: r.ActorID,
+	return port.OptionalRoleChange{TenantID: r.TenantID, Role: r.Role, By: account.By(account.RoleTenantAdministrator, r.ActorID), ActorID: r.ActorID,
 		ActorRole: account.RoleTenantAdministrator, CorrelationID: r.CorrelationID, Now: s.Clock()}, nil
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/createaccount"
 	"github.com/code-corhuila/multi-tour-security/internal/core/issuetemp"
 	"github.com/code-corhuila/multi-tour-security/internal/core/listusers"
+	"github.com/code-corhuila/multi-tour-security/internal/core/optionalrole"
 	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
@@ -396,6 +397,32 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		} {
 			run(permissionsHandler(c.svc, io.Discard), http.MethodPost, path, c.contentType, c.body, c.token, c.want)
 		}
+	}
+
+	// the optional roles of the tenant: only an Administrator's ordinary token, and every answer of the use case
+	for _, c := range []struct {
+		method, path, token string
+		svc                 *fakeRoles
+		want                int
+	}{
+		{http.MethodGet, rolesPath, admin, &fakeRoles{states: threeRoles()}, http.StatusOK},
+		{http.MethodGet, rolesPath, "", &fakeRoles{}, http.StatusUnauthorized},
+		{http.MethodGet, rolesPath, tokenWith(t, []string{"MANAGER"}, accountTenant, ""), &fakeRoles{}, http.StatusForbidden},
+		{http.MethodGet, rolesPath, admin, &fakeRoles{err: errors.New("boom")}, http.StatusInternalServerError},
+		{http.MethodPost, enablePath, admin, &fakeRoles{state: threeRoles()[0]}, http.StatusOK},
+		{http.MethodPost, enablePath, admin, &fakeRoles{err: &optionalrole.FieldError{Field: "role"}}, http.StatusBadRequest},
+		{http.MethodPost, enablePath, "", &fakeRoles{}, http.StatusUnauthorized},
+		{http.MethodPost, enablePath, tokenWith(t, []string{"OPERATIONAL_COLLABORATOR"}, accountTenant, ""), &fakeRoles{}, http.StatusForbidden},
+		{http.MethodPost, enablePath, admin, &fakeRoles{err: port.ErrStatusTransition}, http.StatusUnprocessableEntity},
+		{http.MethodPost, enablePath, admin, &fakeRoles{err: errors.New("boom")}, http.StatusInternalServerError},
+		{http.MethodPost, disablePath, admin, &fakeRoles{state: threeRoles()[0]}, http.StatusOK},
+		{http.MethodPost, disablePath, admin, &fakeRoles{err: port.ErrRoleInUse}, http.StatusUnprocessableEntity},
+		{http.MethodPost, disablePath, admin, &fakeRoles{err: &optionalrole.FieldError{Field: "role"}}, http.StatusBadRequest},
+		{http.MethodPost, disablePath, "", &fakeRoles{}, http.StatusUnauthorized},
+		{http.MethodPost, disablePath, tokenWith(t, []string{"MANAGER"}, accountTenant, ""), &fakeRoles{}, http.StatusForbidden},
+		{http.MethodPost, disablePath, admin, &fakeRoles{err: errors.New("boom")}, http.StatusInternalServerError},
+	} {
+		run(rolesHandler(c.svc, io.Discard), c.method, c.path, "", "", c.token, c.want)
 	}
 
 	for path, item := range doc.Paths.Map() {
