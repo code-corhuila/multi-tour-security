@@ -1,6 +1,8 @@
 package smtpmail_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/code-corhuila/multi-tour-security/internal/adapter/smtpmail"
@@ -57,6 +59,21 @@ func TestD_TheBaseUrlCannotCarryWhatBreaksTheLink(t *testing.T) {
 		c := smtpmail.Config{Host: "mailpit", Port: 1025, From: "no-reply@multitour.example", PublicBaseURL: base}
 		if _, err := smtpmail.New(c); err == nil {
 			t.Fatalf("%s was accepted", base)
+		}
+	}
+}
+
+func TestD_APrintedConfigurationOrSenderNeverShowsThePassword(t *testing.T) {
+	c := smtpmail.Config{Host: "smtp.provider.example", Port: 587, User: "mailer", Password: "s3cret-Pass", From: "no-reply@multitour.example",
+		PublicBaseURL: "https://app.multitour.example", RequireTLS: true}
+	m, err := smtpmail.New(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, shown := range map[string]string{"%v": fmt.Sprintf("%v", c), "%+v": fmt.Sprintf("%+v", c), "%#v": fmt.Sprintf("%#v", c),
+		"sender %v": fmt.Sprintf("%v", m), "sender %+v": fmt.Sprintf("%+v", m), "sender %#v": fmt.Sprintf("%#v", m)} {
+		if strings.Contains(shown, "s3cret-Pass") {
+			t.Fatalf("%s shows the password: %s", name, shown)
 		}
 	}
 }

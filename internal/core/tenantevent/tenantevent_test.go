@@ -131,3 +131,32 @@ func TestC_AFailureOfTheStoreIsAnErrorThatIsNeitherInvalidNorRetryLater(t *testi
 		t.Fatal("a service without its store answered")
 	}
 }
+
+func TestC_TheCommercialNameOfAnEventReachesTheCopyAndAnEventWithoutOneLeavesItEmpty(t *testing.T) {
+	named := valid("TenantCreated", "ACTIVE")
+	named.CommercialName = "Travesía Natural SAS"
+	store := &fakeTenants{result: true}
+	if _, err := (&tenantevent.Service{Tenants: store}).Receive(ctx, named); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (&tenantevent.Service{Tenants: store}).Receive(ctx, valid("TenantInactivated", "INACTIVE")); err != nil {
+		t.Fatal(err)
+	}
+	if store.applied[0].CommercialName != "Travesía Natural SAS" {
+		t.Fatalf("the name of the event did not reach the copy: %+v", store.applied[0])
+	}
+	if store.applied[1].CommercialName != "" {
+		t.Fatalf("an event without a name must carry none, so the store keeps the one it knows: %+v", store.applied[1])
+	}
+}
+
+func TestC_ACommercialNameWithAControlCharacterIsAnInvalidEnvelopeAndTouchesNothing(t *testing.T) {
+	for _, name := range []string{"Evil\r\nBcc: x@y.z", "Tab\there", "Nul\x00"} {
+		e := valid("TenantCreated", "ACTIVE")
+		e.CommercialName = name
+		store := &fakeTenants{result: true}
+		if _, err := (&tenantevent.Service{Tenants: store}).Receive(ctx, e); !errors.Is(err, tenantevent.ErrInvalid) || len(store.applied) != 0 {
+			t.Fatalf("%q: err = %v, applied %v", name, err, store.applied)
+		}
+	}
+}

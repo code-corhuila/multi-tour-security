@@ -27,8 +27,9 @@ const (
 	rawLength = 43
 	// MaxCause is the longest cause of a failed send that is recorded.
 	MaxCause = 200
-	// SendTimeout bounds the send and the record of its failure, which do not depend on the caller staying connected.
-	SendTimeout = 15 * time.Second
+	// SendTimeout bounds the send and the record of its failure, which do not depend on the caller staying connected. The
+	// first link is sent inside the request of the customer, so it ends well before the server cuts a request (15 seconds).
+	SendTimeout = 8 * time.Second
 )
 
 // Link is a new link: Raw goes to the person once, Hash is what the store keeps.
