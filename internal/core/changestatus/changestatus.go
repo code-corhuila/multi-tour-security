@@ -5,30 +5,21 @@ package changestatus
 import (
 	"context"
 	"errors"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/account"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
+	"github.com/code-corhuila/multi-tour-security/internal/core/validate"
 )
 
-// ErrInvalid is any part of the request that is not valid; FieldError says which.
-var ErrInvalid = errors.New("the request is not valid")
+// ErrInvalid and FieldError are those every use case shares.
+var ErrInvalid = validate.ErrInvalid
 
-// FieldError names the field that was refused, never its value.
-type FieldError struct{ Field string }
+type FieldError = validate.FieldError
 
-func (e *FieldError) Error() string        { return e.Field + ": is not valid" }
-func (e *FieldError) Is(target error) bool { return target == ErrInvalid }
-
-const (
-	maxReason        = 500
-	maxCorrelationID = 128 // what the outbox takes
-)
-
-var uuid = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+const maxReason = 500
 
 // Request is one change. The tenant and the actor are those of the credential, never of the body.
 type Request struct {
@@ -61,15 +52,15 @@ func (s *Service) change(ctx context.Context, r Request, to account.Status) (por
 	}
 	reason := strings.TrimSpace(r.Reason)
 	switch {
-	case !uuid.MatchString(r.TenantID):
+	case !validate.UUID(r.TenantID):
 		return port.Registered{}, &FieldError{Field: "tenantId"}
-	case !uuid.MatchString(r.AccountID):
+	case !validate.UUID(r.AccountID):
 		return port.Registered{}, &FieldError{Field: "accountId"}
-	case !uuid.MatchString(r.ActorID):
+	case !validate.UUID(r.ActorID):
 		return port.Registered{}, &FieldError{Field: "actorId"}
 	case reason == "" || utf8.RuneCountInString(reason) > maxReason:
 		return port.Registered{}, &FieldError{Field: "reason"}
-	case r.CorrelationID == "" || len(r.CorrelationID) > maxCorrelationID:
+	case !validate.CorrelationID(r.CorrelationID):
 		// every request has one that the HTTP adapter checked: another is a mistake of ours, not of the caller
 		return port.Registered{}, errors.New("the status change has no correlation id")
 	}

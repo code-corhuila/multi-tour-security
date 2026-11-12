@@ -11,6 +11,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/password"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
+	"github.com/code-corhuila/multi-tour-security/internal/core/validate"
 )
 
 // ErrWeakPassword is a new password that breaks the policy or is the temporary one. It says nothing of any account.
@@ -38,7 +39,7 @@ func (s *Service) Change(ctx context.Context, r Request) error {
 	if s.Accounts == nil || s.Hasher == nil || s.Clock == nil {
 		return errors.New("the change of password is not wired: every piece is needed")
 	}
-	if r.AccountID == "" || len(r.CorrelationID) < 1 || len(r.CorrelationID) > 128 {
+	if r.AccountID == "" || !validate.CorrelationID(r.CorrelationID) {
 		return errors.New("the request has no account or no usable correlation id")
 	}
 	now := s.Clock()

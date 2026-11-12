@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/code-corhuila/multi-tour-security/internal/core/account"
 	"github.com/code-corhuila/multi-tour-security/internal/core/createaccount"
 )
 
@@ -13,15 +14,13 @@ func WithCreateInternalUser(service AccountCreator) Option {
 	return func(s *server) { s.internalUsers = service }
 }
 
-const tenantAdministratorRole = "TENANT_ADMINISTRATOR"
-
 // requireTenantAdministrator lets in the credential of an Administrator of a tenant and nothing else: the role in the
 // token, a tenant, and no access mark, which a temporary or a restricted credential carries (spec 003, RN-SEC-003-01).
 // The role is read from the token, not from the database: the token already proves it for its 15 minutes.
 func (s *server) requireTenantAdministrator(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, _ := r.Context().Value(claimsKey{}).(Claims)
-		if !slices.Contains(claims.Roles, tenantAdministratorRole) || claims.TenantID == "" || claims.Access != "" {
+		if !slices.Contains(claims.Roles, account.RoleTenantAdministrator) || claims.TenantID == "" || claims.Access != "" {
 			writeError(w, r, http.StatusForbidden, "FORBIDDEN", "access denied")
 			return
 		}

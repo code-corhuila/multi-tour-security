@@ -19,9 +19,8 @@ type UserStatus struct{ pool *pgxpool.Pool }
 // NewUserStatus expects a non-nil pool; the composition root owns it.
 func NewUserStatus(pool *pgxpool.Pool) *UserStatus { return &UserStatus{pool: pool} }
 
-// internalRoleNames must stay equal to the internal roles of the use case that lists users (core/listusers): both name the
-// five roles that a Tenant Administrator manages.
-var internalRoleNames = []string{"TENANT_ADMINISTRATOR", "OPERATIONAL_COLLABORATOR", "MANAGER", "ACCOUNTANT", "ANALYST"}
+// the roles a Tenant Administrator manages, written once in the account
+var internalRoleNames = account.InternalRoles()
 
 // isInternal keeps a customer, the platform and another tenant's account out of reach: they are not found, not refused.
 const isInternal = `i.tenant_id = $2::uuid AND EXISTS (SELECT 1 FROM security.membership m

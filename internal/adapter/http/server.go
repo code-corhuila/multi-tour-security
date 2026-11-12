@@ -7,17 +7,20 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/code-corhuila/multi-tour-security/internal/core/validate"
 )
 
 const correlationHeader = "X-Correlation-Id"
 
-// A correlation id is reused only when it is short and made of safe characters, so a caller
+// A correlation id is reused only when it is short (the length the outbox takes) and made of safe characters, so a caller
 // cannot inject anything into the logs.
-var validCorrelationID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+var validCorrelationID = regexp.MustCompile(fmt.Sprintf(`^[A-Za-z0-9._-]{1,%d}$`, validate.MaxCorrelationID))
 
 type contextKey struct{}
 

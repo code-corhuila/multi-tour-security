@@ -12,6 +12,7 @@ import (
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenant"
+	"github.com/code-corhuila/multi-tour-security/internal/core/validate"
 )
 
 var (
@@ -39,7 +40,6 @@ type Event struct {
 }
 
 var (
-	uuid       = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 	identifier = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 )
 
@@ -71,7 +71,7 @@ func (s *Service) Receive(ctx context.Context, e Event) (bool, error) {
 func check(e Event) (tenant.Copy, error) {
 	status, statusErr := tenant.ParseStatus(e.Status)
 	switch {
-	case !uuid.MatchString(e.EventID), !uuid.MatchString(e.TenantID):
+	case !validate.UUID(e.EventID), !validate.UUID(e.TenantID):
 	case e.PathTenantID != e.TenantID, e.AggregateID != e.TenantID, e.PayloadTenantID != "" && e.PayloadTenantID != e.TenantID:
 	case e.Version < 1, e.OccurredAt.IsZero(), statusErr != nil:
 	case len(e.Identifier) < 3, len(e.Identifier) > 40, !identifier.MatchString(e.Identifier):

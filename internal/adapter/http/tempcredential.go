@@ -3,10 +3,10 @@ package httpadapter
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 
+	"github.com/code-corhuila/multi-tour-security/internal/core/account"
 	"github.com/code-corhuila/multi-tour-security/internal/core/issuetemp"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 )
@@ -21,18 +21,16 @@ func WithIssueTemporaryCredential(service CredentialIssuer) Option {
 	return func(s *server) { s.credentialIssuer = service }
 }
 
-const platformAdministratorRole = "PLATFORM_ADMINISTRATOR"
-
 // issuerRole tells which administrator the credential is: a Tenant Administrator of a tenant, or the Platform Administrator, who has
 // none. A temporary or restricted credential is neither, and the use case decides who may issue to whom.
 func issuerRole(claims Claims) (string, bool) {
 	switch {
 	case claims.Access != "":
 		return "", false
-	case slices.Contains(claims.Roles, tenantAdministratorRole) && claims.TenantID != "":
-		return tenantAdministratorRole, true
-	case slices.Contains(claims.Roles, platformAdministratorRole) && claims.TenantID == "":
-		return platformAdministratorRole, true
+	case slices.Contains(claims.Roles, account.RoleTenantAdministrator) && claims.TenantID != "":
+		return account.RoleTenantAdministrator, true
+	case slices.Contains(claims.Roles, account.RolePlatformAdministrator) && claims.TenantID == "":
+		return account.RolePlatformAdministrator, true
 	}
 	return "", false
 }
@@ -72,19 +70,16 @@ func (s *server) issueTemporaryCredential(w http.ResponseWriter, r *http.Request
 		out, err = toAccountBody(reg)
 	}
 	switch {
-	case errors.As(err, &invalid) && invalid.Field != "actorId":
-		writeEnvelope(w, r, http.StatusBadRequest, errorBody{Error: "VALIDATION_ERROR", Message: "the request is not valid",
-			Details: []fieldDetail{{Field: invalid.Field, Message: invalid.Err.Error()}}})
+	case errors.As(err, &invalid) && callerField(invalid):
+		refuseField(w, r, invalid)
 	case errors.Is(err, port.ErrUserNotFound):
-		writeError(w, r, http.StatusNotFound, "NOT_FOUND", "the user does not exist")
+		refuseNoUser(w, r)
 	case errors.Is(err, issuetemp.ErrNotAuthorized):
-		writeError(w, r, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", "the issuer cannot issue a credential to that user")
+		refuseRule(w, r, "the issuer cannot issue a credential to that user")
 	case errors.Is(err, port.ErrNotTemporary):
-		writeError(w, r, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", "the user has no temporary credential to replace: they chose their own password")
+		refuseRule(w, r, "the user has no temporary credential to replace: they chose their own password")
 	case err != nil:
-		// the actor comes from the credential: an id that is not one is our failure. Only the type is logged: a driver error can quote a row
-		s.logger.ErrorContext(r.Context(), "issuing a temporary credential failed", "traceId", traceID(r.Context()), "errorType", fmt.Sprintf("%T", err))
-		writeError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "an internal error occurred")
+		s.fail(w, r, "issuing a temporary credential", err)
 	default:
 		writeJSON(w, http.StatusOK, out)
 	}

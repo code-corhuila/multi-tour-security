@@ -13,6 +13,8 @@ It answers `GET /health` without a token; the sign-in, platform sign-in and rene
 
 A Tenant Administrator registers the internal users of their tenant with `POST /api/v1/security/users` (HU-SEC-005): the password they type and its confirmation are a temporary credential of 72 hours that only allows the user to choose their own at the first sign-in, and the user then holds the role they were given and no other. The tenant is always the one of the credential. A taken e-mail is refused saying whose it is.
 
+The same Administrator manages those users (HU-SEC-005): `GET /api/v1/security/users` lists them, newest first, with the listing envelope and the filters `role` and `status`; `POST /api/v1/security/users/{accountId}/inactivation` and `.../reactivation` cut and give back their access with a reason, and an inactivation also cuts every session the user had and writes `AccountSessionsRevoked` with the actor and the reason. The last active Administrator of a tenant cannot be inactivated. `POST /api/v1/security/users/{accountId}/temporary-credential` gives a user whose first temporary credential expired a new one of 72 hours, typed by the issuer: a Tenant Administrator may issue it to anyone of their tenant except the first Administrator, and the Platform Administrator to the first Administrator and, when no Administrator of the tenant can sign in, to any active one. Who did each change, when and why is kept with the account and shown in the list; no answer carries a password or a hash. Which of these the other services honor (the refusal of a revoked session) is described in `07-api/specs/multi-tour-security/` of `multi-tour-docs`.
+
 ## How to start it
 
 Needs Go 1.26 and the infrastructure of `multi-tour-infra-postgres` (the instance and the user `security_app`, created by its `postgres/init/01-instance.sh`; run that script again by hand if the instance already existed, Annex J, J.5.5).
@@ -65,7 +67,7 @@ Run beside the server, with the same binary and the variables exported in the sh
 
 ## Still to come
 
-The stories that recover the password and grant permissions: see `07-api/specs/multi-tour-security/` in `multi-tour-docs`.
+The stories that recover the password and grant special permissions and optional roles: see `07-api/specs/multi-tour-security/` in `multi-tour-docs`.
 
 ## Branching
 

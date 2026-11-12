@@ -7,11 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"regexp"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/code-corhuila/multi-tour-security/internal/core/validate"
 )
 
 // Status of an event: it is pending until job 7 publishes it or its attempts run out.
@@ -107,8 +108,6 @@ const (
 	maxErrorText = 1000
 )
 
-var eventID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-
 // Page is one page of the events that are due.
 type Page struct {
 	Data       []Event
@@ -155,7 +154,7 @@ func (s *Service) MarkPublished(ctx context.Context, id string) (Event, error) {
 	if err := s.ready(); err != nil {
 		return Event{}, err
 	}
-	if !eventID.MatchString(id) {
+	if !validate.UUID(id) {
 		return Event{}, ErrNotFound
 	}
 	now := s.Clock()
@@ -171,7 +170,7 @@ func (s *Service) RecordFailedAttempt(ctx context.Context, id, text string) (Eve
 	if !ok {
 		return Event{}, ErrInvalid
 	}
-	if !eventID.MatchString(id) {
+	if !validate.UUID(id) {
 		return Event{}, ErrNotFound
 	}
 	now, policy := s.Clock(), s.Policy

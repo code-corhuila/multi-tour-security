@@ -3,7 +3,6 @@ package httpadapter
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 
@@ -52,10 +51,8 @@ func (s *server) listInternalUsers(w http.ResponseWriter, r *http.Request) {
 	claims, _ := r.Context().Value(claimsKey{}).(Claims)
 	result, err := s.userLister.List(r.Context(), listusers.Query{TenantID: claims.TenantID, Role: role, Status: status, Page: page, Limit: limit})
 	var invalid *listusers.FieldError
-	// a tenant that is not an id comes from the credential, not from the caller: it is our failure, not a 400
-	if errors.As(err, &invalid) && invalid.Field != "tenantId" {
-		writeEnvelope(w, r, http.StatusBadRequest, errorBody{Error: "VALIDATION_ERROR", Message: "the request is not valid",
-			Details: []fieldDetail{{Field: invalid.Field, Message: "is not valid"}}})
+	if errors.As(err, &invalid) && callerField(invalid) {
+		refuseField(w, r, invalid)
 		return
 	}
 	data := make([]accountBody, 0, len(result.Data))
@@ -66,8 +63,7 @@ func (s *server) listInternalUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		s.logger.ErrorContext(r.Context(), "listing the internal users failed", "traceId", traceID(r.Context()), "errorType", fmt.Sprintf("%T", err)) // only the type: a driver error can quote a row
-		writeError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "an internal error occurred")
+		s.fail(w, r, "listing the internal users", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
