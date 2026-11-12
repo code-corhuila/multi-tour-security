@@ -57,6 +57,11 @@ func TestI_ActivationAndTheFactAreWrittenTogether(t *testing.T) {
 	if strings.Contains(payload, l.TokenHash) || strings.Contains(payload, "token") || strings.Contains(payload, "password") {
 		t.Fatalf("the fact carries no link and no password: %s", payload)
 	}
+	// commercial-reservation reads the tenant from the payload, not only from the envelope (spec 004, RN-SEC-004-08)
+	var payloadTenant string
+	if err := pool.QueryRow(ctx, `SELECT payload->>'tenantId' FROM security.outbox_event`).Scan(&payloadTenant); err != nil || payloadTenant != tenant {
+		t.Fatalf("the payload carries the tenant %q (%v), want %q", payloadTenant, err, tenant)
+	}
 }
 
 func TestI_ALinkThatDoesNotWorkChangesNothing(t *testing.T) {
