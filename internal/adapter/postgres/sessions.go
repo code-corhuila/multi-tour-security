@@ -103,8 +103,8 @@ WITH cut AS (
 )
 INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, payload, correlation_id, occurred_at)
 SELECT tenant_id, 'AccountSessionsRevoked', identity_id,
-       jsonb_build_object('accountId', identity_id,
-           'revokedFrom', to_char(sessions_revoked_from AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+       jsonb_strip_nulls(jsonb_build_object('accountId', identity_id, 'tenantId', tenant_id,
+           'revokedFrom', to_char(sessions_revoked_from AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))),
        $3, $2::timestamptz
 FROM cut`
 

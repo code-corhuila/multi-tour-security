@@ -160,6 +160,7 @@ func TestI_RemovingKeepsWhoAndWhenCutsTheSessionsAndWritesBothEventsTogether(t *
 		Scan(&actor, &reason, &payload); err != nil || actor != actorID || reason != "special permission removed: MANAGE_CASH" || !strings.Contains(payload, "revokedFrom") {
 		t.Fatalf("AccountSessionsRevoked: actor=%s reason=%q payload=%s %v", actor, reason, payload, err)
 	}
+	requireRevocationsCarryTheTenant(t, pool)
 	var revokedPayload string
 	if err := pool.QueryRow(ctx, `SELECT actor_id::text || ' ' || payload::text FROM security.outbox_event WHERE aggregate_id = $1::uuid AND event_type = 'SpecialPermissionRevoked'`, id).Scan(&revokedPayload); err != nil ||
 		!strings.Contains(revokedPayload, actorID) || !strings.Contains(revokedPayload, "MANAGE_CASH") || !strings.Contains(revokedPayload, "revokedAt") || strings.Contains(strings.ToLower(revokedPayload), "hash") {
