@@ -41,6 +41,8 @@ type Registered struct {
 	Phone         string
 	EmailVerified bool
 	CreatedAt     time.Time
+	// Changed is the last change of status; zero when the account never changed.
+	Changed StatusChange
 }
 
 // AccountRegistry is where the accounts of one story are created, and the memory of which key made which account.
