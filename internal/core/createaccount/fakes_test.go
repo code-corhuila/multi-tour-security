@@ -42,16 +42,22 @@ func (f *fakeTenants) FindByID(_ context.Context, id string) (tenant.Copy, bool,
 	return c, ok, f.err
 }
 
-// fakeAccounts answers only the lookup by e-mail; any other method of the port would panic, which proves it is unused.
+// fakeAccounts answers only the lookup by e-mail and the roles of an account; any other method of the port would panic,
+// which proves it is unused.
 type fakeAccounts struct {
 	port.Accounts
 	byKey map[string]account.Account // tenantID + "|" + e-mail
+	roles map[string][]string        // account id -> roles
 	err   error
 }
 
 func (f *fakeAccounts) FindByEmail(_ context.Context, tenantID, email string) (account.Account, bool, error) {
 	a, ok := f.byKey[tenantID+"|"+email]
 	return a, ok, f.err
+}
+
+func (f *fakeAccounts) RolesOf(_ context.Context, id string) ([]string, error) {
+	return f.roles[id], f.err
 }
 
 type fakeRegistry struct {
@@ -150,7 +156,7 @@ type world struct {
 func newWorld() *world {
 	w := &world{
 		tenants:       &fakeTenants{copies: map[string]tenant.Copy{tenantID: {TenantID: tenantID, Identifier: "travesia", Status: tenant.Active}}},
-		accounts:      &fakeAccounts{byKey: map[string]account.Account{}},
+		accounts:      &fakeAccounts{byKey: map[string]account.Account{}, roles: map[string][]string{}},
 		registry:      &fakeRegistry{},
 		hasher:        &fakeHasher{},
 		mailer:        &fakeMailer{},
@@ -168,7 +174,7 @@ func customer() createaccount.Command {
 
 func internalUser() createaccount.Command {
 	return createaccount.Command{Kind: createaccount.InternalUser, TenantID: tenantID, FullName: "Luis Gómez",
-		Email: "luis@example.com", Password: goodPass, Role: "OPERATIONAL_COLLABORATOR", Actor: actorAdmin, IdempotencyKey: idemKey}
+		Email: "luis@example.com", Password: goodPass, Confirmation: goodPass, Role: "OPERATIONAL_COLLABORATOR", Actor: actorAdmin, IdempotencyKey: idemKey}
 }
 
 func firstAdministrator() createaccount.Command {

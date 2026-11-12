@@ -189,6 +189,50 @@ paths:
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
+  /api/v1/security/users:
+    post:
+      summary: Register an internal user of the tenant
+      description: >
+        The Tenant Administrator registers a user of their own tenant with one role among TENANT_ADMINISTRATOR,
+        OPERATIONAL_COLLABORATOR, MANAGER, ACCOUNTANT and ANALYST (HU-SEC-005). The tenant is the tenantId of the token and
+        nothing in the body can change it; a field that is not in the contract is 400. The password the Administrator types
+        and its confirmation, which must match, follow the policy; the password is a temporary credential of 72 hours that
+        only allows choosing another, it is stored only as a hash and is never returned. The tenant must be ACTIVE. An
+        e-mail that already has an account in the tenant is 422 with the reason in details: an internal user, an inactive
+        internal user who can be reactivated, or a Final Customer account. A repeat with the same Idempotency-Key answers
+        200 with the user already created. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is
+        accepted: a collaborator, a customer, the Platform Administrator and a temporary or restricted token get 403.
+      operationId: createInternalUser
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInternalUserRequest'
+      responses:
+        "201":
+          $ref: '#/components/responses/Account'
+        "200":
+          $ref: '#/components/responses/Account'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
   /api/v1/security/sessions/password:
     put:
       summary: Choose the own password
@@ -762,6 +806,18 @@ components:
         email: {type: string, minLength: 3, maxLength: 254}
         phone: {type: string, pattern: '^[0-9+() -]{7,20}$'}
         password: {type: string, minLength: 8, maxLength: 72, description: "At most 72 bytes, which the policy checks"}
+        passwordConfirmation: {type: string, minLength: 1, maxLength: 72, description: Must match password}
+    CreateInternalUserRequest:
+      type: object
+      required: [fullName, email, role, password, passwordConfirmation]
+      additionalProperties: false
+      properties:
+        fullName: {type: string, minLength: 1, maxLength: 100}
+        email: {type: string, minLength: 3, maxLength: 254}
+        role:
+          type: string
+          enum: [TENANT_ADMINISTRATOR, OPERATIONAL_COLLABORATOR, MANAGER, ACCOUNTANT, ANALYST]
+        password: {type: string, minLength: 8, maxLength: 72, description: "The temporary credential; at most 72 bytes, which the policy checks"}
         passwordConfirmation: {type: string, minLength: 1, maxLength: 72, description: Must match password}
     CreateFirstAdministratorRequest:
       type: object
