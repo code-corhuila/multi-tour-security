@@ -70,3 +70,22 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: security-ddl-indexes-005
+      author: Molina211
+      labels: "HU-SEC-005,ddl,indexes"
+      comment: "The index of the listing of the users of a tenant, built concurrently (HU-SEC-005, plan D-04)."
+      runInTransaction: false
+      changes:
+        - sqlFile:
+            path: 005_create_identity_listing_index.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/10_indexes/005_create_identity_listing_index.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

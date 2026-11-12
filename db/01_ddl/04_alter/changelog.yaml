@@ -106,3 +106,21 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+
+  - changeSet:
+      id: security-ddl-alter-007
+      author: Molina211
+      labels: "HU-SEC-005,ddl,alter"
+      comment: "Who, when and why an account last changed status, and who and when it was last given a temporary credential (HU-SEC-005, plan D-10)."
+      changes:
+        - sqlFile:
+            path: 007_add_account_trace.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/04_alter/007_add_account_trace.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

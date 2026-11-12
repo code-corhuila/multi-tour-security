@@ -57,7 +57,7 @@ func build(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Handler, *
 	background := httpadapter.NewBackground(logger, backgroundTimeout, 2*dbPoolSize)
 	return httpadapter.New(httpadapter.NewVerifier(cfg.publicKey), logger,
 		httpadapter.WithSignIn(signIn), httpadapter.WithRefresh(renewal), httpadapter.WithChangePassword(firstPassword),
-		httpadapter.WithCreateAccount(newAccounts, tenants), httpadapter.WithCreateFirstAdministrator(newAccounts), httpadapter.WithOutbox(events),
+		httpadapter.WithCreateAccount(newAccounts, tenants), httpadapter.WithCreateFirstAdministrator(newAccounts), httpadapter.WithCreateInternalUser(newAccounts), httpadapter.WithOutbox(events),
 		httpadapter.WithTenantEvents(&tenantevent.Service{Tenants: tenants}),
 		httpadapter.WithLinkRequests(askForLink, background), httpadapter.WithEmailConfirmation(confirmEmail)), background, nil
 }

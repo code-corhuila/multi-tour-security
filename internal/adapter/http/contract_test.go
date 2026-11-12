@@ -112,7 +112,7 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 			req.Header.Set("Content-Type", contentType)
 		}
 		req.Header.Set("X-Correlation-Id", "gate-1")
-		if strings.HasSuffix(path, "/events") || strings.HasSuffix(path, "/accounts") || strings.HasSuffix(path, "/administrators") {
+		if strings.HasSuffix(path, "/events") || strings.HasSuffix(path, "/accounts") || strings.HasSuffix(path, "/administrators") || strings.HasSuffix(path, "/users") {
 			req.Header.Set("Idempotency-Key", eventKey)
 		}
 		rec := httptest.NewRecorder()
@@ -286,6 +286,28 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		{"application/json", adminBody, svcToken, &fakeCreator{err: errors.New("boom")}, http.StatusInternalServerError},
 	} {
 		run(adminHandler(c.svc, io.Discard), http.MethodPost, adminRoute, c.contentType, c.body, c.token, c.want)
+	}
+
+	// an internal user of the tenant: only an Administrator's ordinary token, and every answer of the use case
+	bigUser := `{"fullName":"` + strings.Repeat("a", 4200) + `"}`
+	admin := tokenWith(t, []string{"TENANT_ADMINISTRATOR"}, accountTenant, "")
+	for _, c := range []struct {
+		contentType, body, token string
+		svc                      *fakeCreator
+		want                     int
+	}{
+		{"application/json", userBody, admin, &fakeCreator{reg: registeredUser(), created: true}, http.StatusCreated},
+		{"application/json", userBody, admin, &fakeCreator{reg: registeredUser()}, http.StatusOK},
+		{"application/json", `{"fullName":`, admin, &fakeCreator{}, http.StatusBadRequest},
+		{"application/json", userBody, admin, &fakeCreator{err: &createaccount.FieldError{Field: "role", Err: errors.New("is not valid")}}, http.StatusBadRequest},
+		{"application/json", userBody, "", &fakeCreator{}, http.StatusUnauthorized},
+		{"application/json", userBody, tokenWith(t, []string{"OPERATIONAL_COLLABORATOR"}, accountTenant, ""), &fakeCreator{}, http.StatusForbidden},
+		{"text/plain", userBody, admin, &fakeCreator{}, http.StatusUnsupportedMediaType},
+		{"application/json", bigUser, admin, &fakeCreator{}, http.StatusRequestEntityTooLarge},
+		{"application/json", userBody, admin, &fakeCreator{err: &createaccount.EmailTakenError{Reason: createaccount.TakenByInactiveInternalUser}}, http.StatusUnprocessableEntity},
+		{"application/json", userBody, admin, &fakeCreator{err: errors.New("boom")}, http.StatusInternalServerError},
+	} {
+		run(usersHandler(c.svc, io.Discard), http.MethodPost, usersRoute, c.contentType, c.body, c.token, c.want)
 	}
 
 	for path, item := range doc.Paths.Map() {
