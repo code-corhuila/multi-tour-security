@@ -6,6 +6,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/code-corhuila/multi-tour-security/internal/core/account"
 )
 
 var (
@@ -29,7 +31,7 @@ func refuse(field string, err error) error { return &FieldError{Field: field, Er
 func profile(r rule, c Command) (fullName, phone, role string, err error) {
 	role = r.role
 	if role == "" {
-		if role = strings.TrimSpace(c.Role); !tenantRole(role) {
+		if role = strings.TrimSpace(c.Role); !account.IsInternalRole(role) {
 			return "", "", "", refuse("role", errInvalid)
 		}
 	}

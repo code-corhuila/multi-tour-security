@@ -14,6 +14,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/password"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenant"
+	"github.com/code-corhuila/multi-tour-security/internal/core/validate"
 	"github.com/code-corhuila/multi-tour-security/internal/core/verification"
 )
 
@@ -32,14 +33,8 @@ var (
 	ErrNotWired        = errors.New("create account is not wired: every piece is needed")
 )
 
-// FieldError names the field that was refused and why, never the value.
-type FieldError struct {
-	Field string
-	Err   error
-}
-
-func (e *FieldError) Error() string { return e.Field + ": " + e.Err.Error() }
-func (e *FieldError) Unwrap() error { return e.Err }
+// FieldError names the field that was refused and why, never the value; it is the one every use case shares.
+type FieldError = validate.FieldError
 
 // Command is one request. FirstName and LastName are the customer's; FullName is the other kinds'. Role is asked only
 // for an internal user, and Actor is who asks for the other two kinds. Confirmation is asked of the customer and of the internal user; the first Administrator has none.
