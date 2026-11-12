@@ -237,3 +237,24 @@ func TestC_LogsShowNoCredentialNorEmailWhateverTheOutcome(t *testing.T) {
 		}
 	}
 }
+
+func TestC_APendingCustomerIsAnsweredPendingAndUnverified(t *testing.T) {
+	reg := registered()
+	reg.Account.Status = account.Pending
+	rec := postAccount(accountsHandler(&fakeCreator{reg: reg, created: true}, &fakeTenantFinder{found: true}, io.Discard), accountsRoute, "application/json", customerBody, "key-0001-abcd")
+	var body map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if rec.Code != http.StatusCreated || body["accountStatus"] != "PENDING" || body["emailVerified"] != false {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "token") || strings.Contains(rec.Body.String(), "link") {
+		t.Fatalf("the answer carries nothing of the link: %s", rec.Body)
+	}
+}
+
+// pendingRegistered is the account of a customer that waits for its e-mail to be verified.
+func pendingRegistered() port.Registered {
+	reg := registered()
+	reg.Account.Status = account.Pending
+	return reg
+}

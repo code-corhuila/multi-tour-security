@@ -128,6 +128,8 @@ func toAccountBody(reg port.Registered) (accountBody, error) {
 		status = "ACTIVE"
 	case account.Inactive:
 		status = "INACTIVE"
+	case account.Pending:
+		status = "PENDING"
 	default:
 		return accountBody{}, errors.New("the account has a status the contract does not know")
 	}
