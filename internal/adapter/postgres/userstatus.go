@@ -72,6 +72,11 @@ func (s *UserStatus) ChangeStatus(ctx context.Context, c port.StatusCommand) (po
 		return port.Registered{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if to == "INACTIVE" {
+		if err := keepOneAdministrator(ctx, tx, c); err != nil {
+			return port.Registered{}, err
+		}
+	}
 	var changed int
 	if err := tx.QueryRow(ctx, changeStatus, c.AccountID, c.TenantID, from, to, c.Now, c.By, c.Reason, internalRoleNames, c.ActorID, c.CorrelationID).Scan(&changed); err != nil {
 		return port.Registered{}, err
@@ -95,6 +100,36 @@ func (s *UserStatus) ChangeStatus(ctx context.Context, c port.StatusCommand) (po
 		return port.Registered{}, err
 	}
 	return reg, nil
+}
+
+// keepOneAdministrator refuses the inactivation of the only active Tenant Administrator of the tenant (RN-SEC-003-11). It locks
+// every active administrator of the tenant (one whose membership is not active cannot act as one, as RolesOf says), in the order of their ids so that two calls cannot wait on each other, and counts them
+// under the lock: two administrators inactivating each other at once are serialized, and the second finds the first already gone.
+func keepOneAdministrator(ctx context.Context, tx pgx.Tx, c port.StatusCommand) error {
+	rows, err := tx.Query(ctx, `SELECT i.identity_id::text FROM security.identity i
+		WHERE i.tenant_id = $1::uuid AND i.identity_status = 'ACTIVE' AND EXISTS (SELECT 1 FROM security.membership m
+			JOIN security.membership_role mr USING (membership_id) WHERE m.identity_id = i.identity_id AND m.membership_status = 'ACTIVE' AND mr.role = 'TENANT_ADMINISTRATOR')
+		ORDER BY i.identity_id FOR NO KEY UPDATE OF i`, c.TenantID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	active, target := 0, false
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return err
+		}
+		active++
+		target = target || id == c.AccountID
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if target && active == 1 {
+		return port.ErrLastAdministrator
+	}
+	return nil
 }
 
 // readUser is one user of the tenant as the list shows it.

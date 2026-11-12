@@ -28,6 +28,8 @@ var (
 	ErrUserNotFound = errors.New("the user does not exist in the tenant")
 	// ErrStatusTransition is a change to the status the account already has, or from a status that cannot make it.
 	ErrStatusTransition = errors.New("the account cannot go to that status from the one it has")
+	// ErrLastAdministrator is the inactivation of the only active Tenant Administrator of a tenant, which may be the actor's own account.
+	ErrLastAdministrator = errors.New("the user is the last active administrator of the tenant")
 )
 
 // StatusChange is the last change of status of an account: who, when and why. The zero value is an account that never changed.

@@ -278,6 +278,106 @@ paths:
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
+  /api/v1/security/users/{accountId}/inactivation:
+    post:
+      summary: Inactivate an internal user of the tenant
+      description: >
+        The Tenant Administrator inactivates an active user of their own tenant with a reason of 1 to 500 characters (HU-SEC-005,
+        AC4). In one transaction the account becomes INACTIVE, the sessions it had are cut, AccountSessionsRevoked is written
+        with the actor and the reason, and who, when and why are kept with the account. The person can no longer sign in nor
+        renew. The tenant and the actor are those of the token and nothing in the body can change them. Inactivating an
+        inactive user is 422 INVALID_STATUS_TRANSITION. The last active Tenant Administrator of the tenant cannot be
+        inactivated, not even by their own account: 422 BUSINESS_RULE_VIOLATION (AC6). A user of another tenant, a customer or
+        an id that does not exist is 404. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
+      operationId: inactivateInternalUser
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusChangeRequest'
+      responses:
+        "200":
+          description: The user as it is now, with the last change
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/users/{accountId}/reactivation:
+    post:
+      summary: Reactivate an internal user of the tenant
+      description: >
+        The Tenant Administrator gives back the access of an inactive user of their own tenant with a reason of 1 to 500
+        characters (HU-SEC-005, AC5). The same record is restored, with the same e-mail, role and identifier, and who, when and
+        why are kept. The credentials issued before the inactivation stay cut: the person signs in again. Reactivating an
+        active user is 422 INVALID_STATUS_TRANSITION; a user of another tenant, a customer or an id that does not exist is 404.
+        Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
+      operationId: reactivateInternalUser
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusChangeRequest'
+      responses:
+        "200":
+          description: The user as it is now, with the last change
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
   /api/v1/security/sessions/password:
     put:
       summary: Choose the own password
@@ -639,6 +739,13 @@ components:
       required: true
       description: One value per intent, the same on every retry (8 to 128 characters)
       schema: {type: string, minLength: 8, maxLength: 128}
+    AccountIdPath:
+      name: accountId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     EventIdPath:
       name: eventId
       in: path
@@ -892,6 +999,19 @@ components:
         emailVerified: {type: boolean}
         temporaryCredentialUntil: {type: string, format: date-time, description: Present while a temporary credential is in force}
         createdAt: {type: string, format: date-time}
+        statusChangedAt: {type: string, format: date-time, description: When the status last changed; absent if it never did}
+        statusChangedBy: {type: string, description: "The actor of the last change, as tenant-administrator/<accountId>"}
+        statusReason: {type: string, description: Why the status last changed}
+    StatusChangeRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Why the access is cut or given back; kept with the account
     AccountPage:
       type: object
       required: [data, meta]
@@ -932,7 +1052,7 @@ components:
       properties:
         error:
           type: string
-          enum: [VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, BUSINESS_RULE_VIOLATION, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, SERVICE_UNAVAILABLE, INTERNAL_ERROR]
+          enum: [VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATUS_TRANSITION, BUSINESS_RULE_VIOLATION, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, SERVICE_UNAVAILABLE, INTERNAL_ERROR]
         message:
           type: string
         details:
