@@ -18,6 +18,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/changepassword"
 	"github.com/code-corhuila/multi-tour-security/internal/core/changestatus"
 	"github.com/code-corhuila/multi-tour-security/internal/core/createaccount"
+	"github.com/code-corhuila/multi-tour-security/internal/core/issuetemp"
 	"github.com/code-corhuila/multi-tour-security/internal/core/listusers"
 	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
@@ -350,6 +351,28 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		} {
 			run(statusHandler(c.svc, io.Discard), http.MethodPost, path, c.contentType, c.body, c.token, c.want)
 		}
+	}
+
+	// a new temporary credential: a Tenant Administrator or the Platform Administrator, and every answer of the use case
+	platformToken := tokenWith(t, []string{"PLATFORM_ADMINISTRATOR"}, "", "")
+	for _, c := range []struct {
+		contentType, body, token string
+		svc                      *fakeIssuer
+		want                     int
+	}{
+		{"application/json", credentialBody, admin, &fakeIssuer{reg: issued()}, http.StatusOK},
+		{"application/json", credentialBody, platformToken, &fakeIssuer{reg: issued()}, http.StatusOK},
+		{"application/json", `{"password":`, admin, &fakeIssuer{}, http.StatusBadRequest},
+		{"application/json", credentialBody, admin, &fakeIssuer{err: &issuetemp.FieldError{Field: "password", Err: errors.New("at least 8 characters")}}, http.StatusBadRequest},
+		{"application/json", credentialBody, "", &fakeIssuer{}, http.StatusUnauthorized},
+		{"application/json", credentialBody, tokenWith(t, []string{"MANAGER"}, accountTenant, ""), &fakeIssuer{}, http.StatusForbidden},
+		{"application/json", credentialBody, admin, &fakeIssuer{err: port.ErrUserNotFound}, http.StatusNotFound},
+		{"text/plain", credentialBody, admin, &fakeIssuer{}, http.StatusUnsupportedMediaType},
+		{"application/json", `{"password":"` + strings.Repeat("a", 5000) + `"}`, admin, &fakeIssuer{}, http.StatusRequestEntityTooLarge},
+		{"application/json", credentialBody, admin, &fakeIssuer{err: issuetemp.ErrNotAuthorized}, http.StatusUnprocessableEntity},
+		{"application/json", credentialBody, admin, &fakeIssuer{err: errors.New("boom")}, http.StatusInternalServerError},
+	} {
+		run(issuerHandler(c.svc, io.Discard), http.MethodPost, credentialPath, c.contentType, c.body, c.token, c.want)
 	}
 
 	for path, item := range doc.Paths.Map() {
