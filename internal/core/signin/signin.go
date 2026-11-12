@@ -133,16 +133,27 @@ func (s *Service) signIn(ctx context.Context, r Request, platform bool) (Tokens,
 	if len(roles) == 0 || (platform && !slices.Contains(roles, account.RolePlatformAdministrator)) || (inactive && !slices.Contains(roles, account.RoleTenantAdministrator)) {
 		return Tokens{}, ErrRefused
 	}
+	// the token of a temporary credential carries no permission, so the store is not asked for it; any other carries the whole set of the
+	// person, read before the success is recorded so that a failure here clears nothing
+	temporary := acct.UsesTemporaryCredential(now)
+	var permissions []string
+	if !temporary {
+		assigned, err := s.Accounts.PermissionsOf(ctx, acct.ID)
+		if err != nil {
+			return Tokens{}, err
+		}
+		permissions = account.PermissionsFor(roles, assigned)
+	}
 	if err := s.Accounts.RecordSuccess(ctx, acct.ID); err != nil {
 		return Tokens{}, err
 	}
 
 	var claims token.Claims
 	switch {
-	case acct.UsesTemporaryCredential(now):
+	case temporary:
 		claims = token.PasswordChange(acct, now)
 	default:
-		claims = token.Access(acct, roles, nil, inactive, now)
+		claims = token.Access(acct, roles, permissions, inactive, now)
 	}
 	access, err := s.Signer.Sign(claims)
 	if err != nil {

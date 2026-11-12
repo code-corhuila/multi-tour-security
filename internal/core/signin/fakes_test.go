@@ -42,6 +42,9 @@ func (f *fakeTenants) FindByID(context.Context, string) (tenant.Copy, bool, erro
 type fakeAccounts struct {
 	byKey     map[string]account.Account // tenantID + "|" + e-mail
 	roles     map[string][]string
+	assigned  map[string][]string // the permissions assigned to each account and held now
+	permCalls int
+	permErr   error
 	failures  []string // ids of the accounts that got a failure
 	correl    []string
 	successes []string
@@ -80,6 +83,11 @@ func (f *fakeAccounts) RecordSuccess(_ context.Context, id string) error {
 }
 func (f *fakeAccounts) RolesOf(_ context.Context, id string) ([]string, error) {
 	return f.roles[id], f.rolesErr
+}
+
+func (f *fakeAccounts) PermissionsOf(_ context.Context, id string) ([]string, error) {
+	f.permCalls++
+	return f.assigned[id], f.permErr
 }
 
 type fakeSessions struct {

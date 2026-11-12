@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/code-corhuila/multi-tour-security/internal/core/account"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -74,6 +75,9 @@ func (r *Registry) Create(ctx context.Context, n port.NewAccount, scope, key str
 		}
 		return port.Registered{}, err
 	}
+	if err := requireEnabledRole(ctx, tx, n); err != nil {
+		return port.Registered{}, err
+	}
 	id, err := insertAccount(ctx, tx, n, scope, key)
 	if err != nil {
 		return port.Registered{}, err
@@ -86,6 +90,22 @@ func (r *Registry) Create(ctx context.Context, n port.NewAccount, scope, key str
 		return port.Registered{}, err // nothing was committed: the caller must not see the hash of an account that is not there
 	}
 	return reg, nil
+}
+
+// requireEnabledRole refuses an optional role that the tenant has not enabled (HU-SEC-006, plan D-10). It reads the setting row in share
+// mode, inside the transaction that inserts the account: the disabling of the role locks that row for update and counts the active
+// holders after it, so a registration and a disabling at once are serialized and none leaves an active holder in a disabled role. A role
+// that is not optional reads nothing; a repeat of a key never gets here, as it is answered before.
+func requireEnabledRole(ctx context.Context, tx pgx.Tx, n port.NewAccount) error {
+	if !account.IsOptionalRole(n.Role) {
+		return nil
+	}
+	var enabled bool
+	err := tx.QueryRow(ctx, `SELECT enabled FROM security.tenant_optional_role WHERE tenant_id = $1::uuid AND role = $2 FOR SHARE`, n.TenantID, n.Role).Scan(&enabled)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !enabled) {
+		return port.ErrRoleNotEnabled
+	}
+	return err
 }
 
 func insertAccount(ctx context.Context, tx pgx.Tx, n port.NewAccount, scope, key string) (string, error) {
