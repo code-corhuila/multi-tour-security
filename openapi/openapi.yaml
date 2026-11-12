@@ -190,6 +190,51 @@ paths:
         "500":
           $ref: '#/components/responses/Error'
   /api/v1/security/users:
+    get:
+      summary: List the internal users of the tenant
+      description: >
+        The Tenant Administrator lists the users of their own tenant that hold one of the five internal roles, newest first,
+        with the listing envelope (HU-SEC-005). A Final Customer is never listed. The tenant is the tenantId of the token and
+        no parameter can change it; a parameter that is not declared, a repeated one or a value out of range is 400 and is
+        never trimmed. role narrows to one internal role and status to ACTIVE, INACTIVE or PENDING. The answer never carries
+        a password or a hash. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
+      operationId: listInternalUsers
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: role
+          in: query
+          schema: {type: string, enum: [TENANT_ADMINISTRATOR, OPERATIONAL_COLLABORATOR, MANAGER, ACCOUNTANT, ANALYST]}
+        - name: status
+          in: query
+          schema: {type: string, enum: [ACTIVE, INACTIVE, PENDING]}
+      responses:
+        "200":
+          description: One page of users
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountPage'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
     post:
       summary: Register an internal user of the tenant
       description: >
@@ -847,6 +892,22 @@ components:
         emailVerified: {type: boolean}
         temporaryCredentialUntil: {type: string, format: date-time, description: Present while a temporary credential is in force}
         createdAt: {type: string, format: date-time}
+    AccountPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountResponse'
+        meta:
+          type: object
+          required: [page, limit, total, totalPages]
+          properties:
+            page: {type: integer, minimum: 1}
+            limit: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, minimum: 0}
+            totalPages: {type: integer, minimum: 0}
     SessionResponse:
       type: object
       description: >

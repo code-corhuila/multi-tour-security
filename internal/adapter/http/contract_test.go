@@ -17,6 +17,7 @@ import (
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/changepassword"
 	"github.com/code-corhuila/multi-tour-security/internal/core/createaccount"
+	"github.com/code-corhuila/multi-tour-security/internal/core/listusers"
 	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
@@ -308,6 +309,24 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		{"application/json", userBody, admin, &fakeCreator{err: errors.New("boom")}, http.StatusInternalServerError},
 	} {
 		run(usersHandler(c.svc, io.Discard), http.MethodPost, usersRoute, c.contentType, c.body, c.token, c.want)
+	}
+
+	// the list of the internal users: only an Administrator's ordinary token, and every answer of the use case
+	list := &fakeLister{page: onePage()}
+	for _, c := range []struct {
+		query, token string
+		svc          *fakeLister
+		want         int
+	}{
+		{"", admin, list, http.StatusOK},
+		{"?page=2&limit=10&role=MANAGER&status=ACTIVE", admin, list, http.StatusOK},
+		{"?sort=email", admin, list, http.StatusBadRequest},
+		{"?role=FINAL_CUSTOMER", admin, &fakeLister{err: &listusers.FieldError{Field: "role"}}, http.StatusBadRequest},
+		{"", "", list, http.StatusUnauthorized},
+		{"", tokenWith(t, []string{"MANAGER"}, accountTenant, ""), list, http.StatusForbidden},
+		{"", admin, &fakeLister{err: errors.New("boom")}, http.StatusInternalServerError},
+	} {
+		run(listHandler(c.svc, io.Discard), http.MethodGet, usersRoute+c.query, "", "", c.token, c.want)
 	}
 
 	for path, item := range doc.Paths.Map() {
