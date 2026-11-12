@@ -62,7 +62,7 @@ func TestC_ATokenIssuedAMinuteForTwoMinutesAgoIsExpiredAtTheService(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := buildHandler(pool, config{privateKey: private, publicKey: public}, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	handler, _, err := build(pool, testConfig(private, public), slog.New(slog.NewJSONHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

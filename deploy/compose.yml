@@ -54,6 +54,8 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
     volumes:
       - ${JWT_KEYS_DIR:?JWT_KEYS_DIR is required, the directory with private.pem and public.pem}:/run/keys:ro
+    # the shutdown drains the requests and waits for the work after an answer within 20 seconds (cmd/security/main.go)
+    stop_grace_period: 25s
     expose:
       - "8086"
     healthcheck:
