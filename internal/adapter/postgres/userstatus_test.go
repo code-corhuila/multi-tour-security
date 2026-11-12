@@ -67,6 +67,7 @@ func TestI_InactivatingChangesTheStatusKeepsTheTraceCutsTheSessionsAndWritesTheE
 		actor != actorID || why != "Left the company" || correlation != "corr-status" {
 		t.Fatalf("event: actor=%s reason=%s correlation=%s %v", actor, why, correlation, err)
 	}
+	requireRevocationsCarryTheTenant(t, pool)
 	if n := revocations(t, pool, id); n != 1 {
 		t.Fatalf("events = %d", n)
 	}

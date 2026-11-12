@@ -276,6 +276,7 @@ func TestI_TheCutoffAndItsEventAreWrittenTogetherForATenantAccountAndAPlatformAc
 	if err != nil || tenantID == nil || *tenantID != tenant || version != 1 || !occurred.Equal(cutoff) || correlation != "corr-1" || status != "PENDING" {
 		t.Fatalf("event of the tenant account: %v %v %v %v %q %q %v", tenantID, version, occurred, correlation, status, payload, err)
 	}
+	requireRevocationsCarryTheTenant(t, pool)
 	var body struct {
 		AccountID, RevokedFrom string
 	}

@@ -49,6 +49,7 @@ func TestI_TheFirstPasswordReplacesTheHashClearsTheTemporaryStateAndTheLockAndCu
 	if err != nil || tenantID != tenant || correlation != "corr-9" || !occurred.Equal(base.Add(time.Minute)) {
 		t.Fatalf("the revocation leaves its event in the same statement: %q %q %v %v", tenantID, correlation, occurred, err)
 	}
+	requireRevocationsCarryTheTenant(t, pool)
 	if n := events(t, pool, "AccountSessionsRevoked"); n != 1 {
 		t.Fatalf("one event, got %d", n)
 	}
