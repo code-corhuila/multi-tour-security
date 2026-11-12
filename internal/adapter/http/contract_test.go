@@ -16,6 +16,7 @@ import (
 	"github.com/getkin/kin-openapi/routers/legacy"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/changepassword"
+	"github.com/code-corhuila/multi-tour-security/internal/core/changepermission"
 	"github.com/code-corhuila/multi-tour-security/internal/core/changestatus"
 	"github.com/code-corhuila/multi-tour-security/internal/core/createaccount"
 	"github.com/code-corhuila/multi-tour-security/internal/core/issuetemp"
@@ -373,6 +374,28 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		{"application/json", credentialBody, admin, &fakeIssuer{err: errors.New("boom")}, http.StatusInternalServerError},
 	} {
 		run(issuerHandler(c.svc, io.Discard), http.MethodPost, credentialPath, c.contentType, c.body, c.token, c.want)
+	}
+
+	// assigning and removing a special permission: only an Administrator's ordinary token, and every answer of the use case
+	for _, path := range []string{grantPath, removalPath} {
+		for _, c := range []struct {
+			contentType, body, token string
+			svc                      *fakePermissions
+			want                     int
+		}{
+			{"application/json", permissionBody, admin, &fakePermissions{reg: registeredUser()}, http.StatusOK},
+			{"application/json", `{"permission":`, admin, &fakePermissions{}, http.StatusBadRequest},
+			{"application/json", permissionBody, admin, &fakePermissions{err: &changepermission.FieldError{Field: "permission"}}, http.StatusBadRequest},
+			{"application/json", permissionBody, "", &fakePermissions{}, http.StatusUnauthorized},
+			{"application/json", permissionBody, tokenWith(t, []string{"OPERATIONAL_COLLABORATOR"}, accountTenant, ""), &fakePermissions{}, http.StatusForbidden},
+			{"application/json", permissionBody, admin, &fakePermissions{err: port.ErrUserNotFound}, http.StatusNotFound},
+			{"text/plain", permissionBody, admin, &fakePermissions{}, http.StatusUnsupportedMediaType},
+			{"application/json", `{"permission":"` + strings.Repeat("a", 5000) + `"}`, admin, &fakePermissions{}, http.StatusRequestEntityTooLarge},
+			{"application/json", permissionBody, admin, &fakePermissions{err: changepermission.ErrNotAssignable}, http.StatusUnprocessableEntity},
+			{"application/json", permissionBody, admin, &fakePermissions{err: errors.New("boom")}, http.StatusInternalServerError},
+		} {
+			run(permissionsHandler(c.svc, io.Discard), http.MethodPost, path, c.contentType, c.body, c.token, c.want)
+		}
 	}
 
 	for path, item := range doc.Paths.Map() {

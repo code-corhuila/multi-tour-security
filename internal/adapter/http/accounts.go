@@ -84,6 +84,8 @@ type accountBody struct {
 	StatusChangedAt *time.Time `json:"statusChangedAt,omitempty"`
 	StatusChangedBy string     `json:"statusChangedBy,omitempty"`
 	StatusReason    string     `json:"statusReason,omitempty"`
+	// Permissions is the whole set the credential of the person carries (HU-SEC-006): always present, maybe empty
+	Permissions []string `json:"permissions"`
 }
 
 // answerAccount is the only place where the answer of the use case that makes accounts becomes HTTP: 201 for a new
@@ -152,7 +154,7 @@ func toAccountBody(reg port.Registered) (accountBody, error) {
 		StatusChangedAt: changedAt, StatusChangedBy: reg.Changed.By, StatusReason: reg.Changed.Reason,
 		TemporaryCredentialUntil: until,
 		AccountID:                reg.Account.ID, TenantID: reg.Account.TenantID, FullName: reg.FullName, Email: reg.Account.EmailNormalized,
-		Phone: reg.Phone, Roles: []string{reg.Role}, AccountStatus: status, EmailVerified: reg.EmailVerified,
+		Phone: reg.Phone, Roles: []string{reg.Role}, Permissions: account.PermissionsFor([]string{reg.Role}, reg.Permissions), AccountStatus: status, EmailVerified: reg.EmailVerified,
 		CreatedAt: reg.CreatedAt.UTC(),
 	}, nil
 }

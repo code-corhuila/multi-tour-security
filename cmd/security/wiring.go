@@ -12,6 +12,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/adapter/postgres"
 	"github.com/code-corhuila/multi-tour-security/internal/adapter/smtpmail"
 	"github.com/code-corhuila/multi-tour-security/internal/core/changepassword"
+	"github.com/code-corhuila/multi-tour-security/internal/core/changepermission"
 	"github.com/code-corhuila/multi-tour-security/internal/core/changestatus"
 	"github.com/code-corhuila/multi-tour-security/internal/core/createaccount"
 	"github.com/code-corhuila/multi-tour-security/internal/core/issuetemp"
@@ -62,6 +63,7 @@ func build(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Handler, *
 		httpadapter.WithSignIn(signIn), httpadapter.WithRefresh(renewal), httpadapter.WithChangePassword(firstPassword),
 		httpadapter.WithCreateAccount(newAccounts, tenants), httpadapter.WithCreateFirstAdministrator(newAccounts), httpadapter.WithCreateInternalUser(newAccounts), httpadapter.WithListInternalUsers(&listusers.Service{Directory: postgres.NewUserDirectory(pool)}),
 		httpadapter.WithIssueTemporaryCredential(&issuetemp.Service{Store: postgres.NewTemporaryCredentials(pool), Hasher: bcryptadapter.Hasher{}, Clock: time.Now}),
+		httpadapter.WithChangePermission(&changepermission.Service{Store: postgres.NewUserPermissions(pool), Clock: time.Now}),
 		httpadapter.WithChangeUserStatus(&changestatus.Service{Store: postgres.NewUserStatus(pool), Clock: time.Now}),
 		httpadapter.WithOutbox(events),
 		httpadapter.WithTenantEvents(&tenantevent.Service{Tenants: tenants}),

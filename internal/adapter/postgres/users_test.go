@@ -1,6 +1,7 @@
 package postgres_test
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -173,6 +174,39 @@ func TestI_TheFiltersNarrowByRoleAndByStatus(t *testing.T) {
 		got, total, err := dir.List(ctx, tenant, c.filter, 20, 0)
 		if err != nil || len(got) != c.want || total != c.want {
 			t.Errorf("%s: users=%d total=%d err=%v, want %d", c.name, len(got), total, err, c.want)
+		}
+	}
+}
+
+// HU-SEC-006, RN-SEC-005-08: the list sees the special permissions that each user holds now.
+
+func TestI_TheListSeesTheAssignedPermissionsThatEachUserHoldsAndNoRemovedOne(t *testing.T) {
+	dir, pool := directory(t)
+	permissions := postgres.NewUserPermissions(pool)
+	colab := user(t, pool, tenant, "colab@example.com", pgtest.Options{}, "OPERATIONAL_COLLABORATOR")
+	user(t, pool, tenant, "manager@example.com", pgtest.Options{}, "MANAGER")
+	for _, p := range []string{"MANAGE_CASH", "CONSULT_SENSITIVE_DATA", "VALIDATE_PAYMENT_PROOFS"} {
+		if _, err := permissions.Grant(ctx, permChange(colab, p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := permissions.Remove(ctx, permChange(colab, "VALIDATE_PAYMENT_PROOFS")); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := dir.List(ctx, tenant, port.UserFilter{Roles: internalRoles}, 20, 0)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("%v %v", got, err)
+	}
+	for _, u := range got {
+		switch u.Account.EmailNormalized {
+		case "colab@example.com":
+			if !slices.Equal(u.Permissions, []string{"CONSULT_SENSITIVE_DATA", "MANAGE_CASH"}) {
+				t.Errorf("the collaborator holds %v: the assigned ones, sorted, and not the removed one", u.Permissions)
+			}
+		case "manager@example.com":
+			if u.Permissions == nil || len(u.Permissions) != 0 {
+				t.Errorf("a user with none shows %v: an empty list and never nil", u.Permissions)
+			}
 		}
 	}
 }

@@ -15,6 +15,10 @@ type UserDirectory struct{ pool *pgxpool.Pool }
 // NewUserDirectory expects a non-nil pool; the composition root owns it.
 func NewUserDirectory(pool *pgxpool.Pool) *UserDirectory { return &UserDirectory{pool: pool} }
 
+// the special permissions the user holds now: the rows of their membership that have no removal, sorted
+const assignedPermissions = `COALESCE((SELECT array_agg(p.permission ORDER BY p.permission) FROM security.membership_permission p
+			JOIN security.membership pm USING (membership_id) WHERE pm.identity_id = identity.identity_id AND p.revoked_at IS NULL), '{}')`
+
 // the filters are optional: an empty status matches any, and the roles are an array so that one query serves them all
 const userFilters = `WHERE tenant_id = $1::uuid AND ($3 = '' OR identity_status = $3)`
 
@@ -29,7 +33,7 @@ const userRole = `JOIN LATERAL (SELECT min(mr.role) AS role FROM security.member
 func (d *UserDirectory) List(ctx context.Context, tenantID string, f port.UserFilter, limit, offset int) ([]port.Registered, int, error) {
 	rows, err := d.pool.Query(ctx, `SELECT identity_id::text, COALESCE(tenant_id::text, ''), email_normalized, identity_status, temporary_until,
 			COALESCE(full_name, ''), COALESCE(phone, ''), email_verified, r.role, created_at, count(*) OVER (),
-			status_changed_at, COALESCE(status_changed_by, ''), COALESCE(status_reason, '')
+			status_changed_at, COALESCE(status_changed_by, ''), COALESCE(status_reason, ''), `+assignedPermissions+`
 		FROM security.identity `+userRole+` `+userFilters+`
 		ORDER BY created_at DESC, identity_id DESC LIMIT $4 OFFSET $5`, tenantID, f.Roles, f.Status, limit, offset)
 	if err != nil {
@@ -43,7 +47,7 @@ func (d *UserDirectory) List(ctx context.Context, tenantID string, f port.UserFi
 		var status string
 		var temporary, changedAt *time.Time
 		if err := rows.Scan(&u.Account.ID, &u.Account.TenantID, &u.Account.EmailNormalized, &status, &temporary,
-			&u.FullName, &u.Phone, &u.EmailVerified, &u.Role, &u.CreatedAt, &total, &changedAt, &u.Changed.By, &u.Changed.Reason); err != nil {
+			&u.FullName, &u.Phone, &u.EmailVerified, &u.Role, &u.CreatedAt, &total, &changedAt, &u.Changed.By, &u.Changed.Reason, &u.Permissions); err != nil {
 			return nil, 0, err
 		}
 		if u.Account.Status, err = statusOf(status); err != nil {
