@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/mail"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -62,3 +63,13 @@ func localHost(host string) bool {
 	}
 	return host == "localhost" || !strings.Contains(host, ".")
 }
+
+// String and GoString keep the password out of any printed configuration, whatever verb prints it.
+func (c Config) String() string {
+	return "smtpmail.Config{host: " + c.Host + ", port: " + strconv.Itoa(c.Port) + ", from: " + c.From + ", tls required: " + strconv.FormatBool(c.RequireTLS) + "}"
+}
+func (c Config) GoString() string { return c.String() }
+
+// String and GoString of the sender hide its configuration for the same reason.
+func (m *Mailer) String() string   { return "smtpmail.Mailer{" + m.c.String() + "}" }
+func (m *Mailer) GoString() string { return m.String() }

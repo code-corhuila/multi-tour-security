@@ -48,6 +48,11 @@ func environment(files keyFiles, overrides map[string]string) func(string) strin
 		"DATABASE_URL":         "postgres://security_app:" + secret + "@postgres:5432/multitour",
 		"JWT_PRIVATE_KEY_FILE": files.private,
 		"JWT_PUBLIC_KEY_FILE":  files.public,
+		"SMTP_HOST":            "mailpit",
+		"SMTP_PORT":            "1025",
+		"SMTP_FROM":            "no-reply@multitour.example",
+		"SMTP_REQUIRE_TLS":     "false",
+		"PUBLIC_BASE_URL":      "http://localhost:4200",
 	}
 	for name, value := range overrides {
 		env[name] = value
@@ -124,5 +129,62 @@ func TestC_ConfigNeverPrintsItsSecrets(t *testing.T) {
 		if printed := fmt.Sprintf(verb, cfg); strings.Contains(printed, secret) {
 			t.Fatalf("%s prints the password: %s", verb, printed)
 		}
+	}
+}
+
+func TestC_StartupReadsTheMailSettingsAndRequiresTlsUnlessTheEnvironmentSaysItIsNot(t *testing.T) {
+	files := writeKeys(t, 2048)
+	cfg, err := loadConfig(environment(files, nil), os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.mail.Host != "mailpit" || cfg.mail.Port != 1025 || cfg.mail.From != "no-reply@multitour.example" || cfg.mail.RequireTLS || cfg.mail.PublicBaseURL != "http://localhost:4200" {
+		t.Fatalf("mail = %+v", cfg.mail)
+	}
+	provider := map[string]string{"SMTP_HOST": "smtp.provider.example", "SMTP_PORT": "587", "SMTP_USER": "mailer", "SMTP_PASSWORD": secret,
+		"SMTP_REQUIRE_TLS": "", "PUBLIC_BASE_URL": "https://app.multitour.example"}
+	cfg, err = loadConfig(environment(files, provider), os.ReadFile)
+	if err != nil || !cfg.mail.RequireTLS || cfg.mail.User != "mailer" || cfg.mail.Password != secret {
+		t.Fatalf("an unset SMTP_REQUIRE_TLS is true: %+v %v", cfg.mail, err)
+	}
+	for _, shown := range []string{fmt.Sprintf("%v", cfg), fmt.Sprintf("%+v", cfg), fmt.Sprintf("%#v", cfg)} {
+		if strings.Contains(shown, secret) {
+			t.Fatalf("a printed configuration shows the password of the mail server: %s", shown)
+		}
+	}
+}
+
+func TestC_StartupRefusesAMailConfigurationThatCannotSendOrWouldSendInClear(t *testing.T) {
+	files := writeKeys(t, 2048)
+	cases := map[string]map[string]string{
+		"no host":                       {"SMTP_HOST": ""},
+		"no port":                       {"SMTP_PORT": ""},
+		"port that is not a number":     {"SMTP_PORT": "abc"},
+		"no sender":                     {"SMTP_FROM": ""},
+		"no base url":                   {"PUBLIC_BASE_URL": ""},
+		"tls that is neither":           {"SMTP_REQUIRE_TLS": "maybe"},
+		"a provider without tls":        {"SMTP_HOST": "smtp.provider.example", "SMTP_REQUIRE_TLS": "false"},
+		"a provider and http":           {"SMTP_HOST": "smtp.provider.example", "SMTP_REQUIRE_TLS": "true"},
+		"a user without a password":     {"SMTP_USER": "mailer"},
+		"a password without a user":     {"SMTP_PASSWORD": secret},
+		"a provider padded with spaces": {"SMTP_HOST": " smtp.provider.example ", "SMTP_REQUIRE_TLS": "false"},
+	}
+	for name, overrides := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := loadConfig(environment(files, overrides), os.ReadFile)
+			if err == nil {
+				t.Fatal("start-up must fail")
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("the error leaks the password: %v", err)
+			}
+		})
+	}
+}
+
+func TestC_AMissingVariableIsNamedAndTheMessageSaysWhereToSetIt(t *testing.T) {
+	_, err := loadConfig(environment(writeKeys(t, 2048), map[string]string{"SMTP_HOST": "", "PUBLIC_BASE_URL": ""}), os.ReadFile)
+	if err == nil || !strings.Contains(err.Error(), "SMTP_HOST") || !strings.Contains(err.Error(), "PUBLIC_BASE_URL") || !strings.Contains(err.Error(), "env/") {
+		t.Fatalf("err = %v, want the names of the variables and the file where they are set", err)
 	}
 }

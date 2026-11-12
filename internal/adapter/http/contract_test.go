@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/getkin/kin-openapi/openapi3filter"
@@ -20,6 +21,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenantevent"
+	"github.com/code-corhuila/multi-tour-security/internal/core/verifyemail"
 )
 
 // Every answer is validated against the published contract, each scenario says the status it must give, and the last
@@ -224,6 +226,45 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		{"application/json", customerBody, &fakeCreator{err: errors.New("boom")}, known, http.StatusInternalServerError},
 	} {
 		run(accountsHandler(c.svc, c.tenants, io.Discard), http.MethodPost, accountsRoute, c.contentType, c.body, "", c.want)
+	}
+
+	// asking for a new link is always 202 when the body is well formed
+	bigAsk := `{"email":"` + strings.Repeat("a", 4200) + `"}`
+	for _, c := range []struct {
+		path, contentType, body string
+		err                     error
+		want                    int
+	}{
+		{requestRoute, "application/json", askBody, nil, http.StatusAccepted},
+		{requestRoute, "application/json", askBody, errors.New("boom"), http.StatusAccepted},
+		{requestRoute, "application/json", `{"email":`, nil, http.StatusBadRequest},
+		{requestRoute, "application/json", `{"email":"no-at-sign"}`, nil, http.StatusBadRequest},
+		{requestRoute, "text/plain", askBody, nil, http.StatusUnsupportedMediaType},
+		{requestRoute, "application/json", bigAsk, nil, http.StatusRequestEntityTooLarge},
+	} {
+		handler := askHandler(&fakeRequester{err: c.err}, background(time.Second), io.Discard)
+		run(handler, http.MethodPost, c.path, c.contentType, c.body, "", c.want)
+	}
+
+	// confirming the e-mail has its own answers
+	bigConfirm := `{"token":"` + linkToken + `","password":"` + strings.Repeat("p", 4200) + `"}`
+	for _, c := range []struct {
+		contentType, body string
+		err               error
+		want              int
+	}{
+		{"application/json", confirmBody, nil, http.StatusNoContent},
+		{"application/json", `{"token":`, nil, http.StatusBadRequest},
+		{"application/json", confirmBody, verifyemail.ErrInvalidRequest, http.StatusBadRequest},
+		{"application/json", confirmBody, verifyemail.ErrWrongPassword, http.StatusUnauthorized},
+		{"application/json", confirmBody, verifyemail.ErrTenantNotFound, http.StatusNotFound},
+		{"application/json", bigConfirm, nil, http.StatusRequestEntityTooLarge},
+		{"text/plain", confirmBody, nil, http.StatusUnsupportedMediaType},
+		{"application/json", confirmBody, verifyemail.ErrBadLink, http.StatusUnprocessableEntity},
+		{"application/json", confirmBody, errors.New("boom"), http.StatusInternalServerError},
+	} {
+		handler := verificationHandler(&fakeRequester{}, &fakeConfirmer{err: c.err}, background(time.Second), io.Discard)
+		run(handler, http.MethodPost, confirmRoute, c.contentType, c.body, "", c.want)
 	}
 
 	// the first Administrator of a tenant, for the saga: only a service, and every answer of the use case
