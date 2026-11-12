@@ -78,6 +78,9 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 	if s.internalUsers != nil {
 		mux.Handle("POST /api/v1/security/users", s.protect(s.requireTenantAdministrator(http.HandlerFunc(s.createInternalUser))))
 	}
+	if s.userLister != nil {
+		mux.Handle("GET /api/v1/security/users", s.protect(s.requireTenantAdministrator(http.HandlerFunc(s.listInternalUsers))))
+	}
 	if s.linkRequester != nil && s.background != nil {
 		// public by design: a person who is waiting for a link has no token
 		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/email-verifications", s.askForLink)
@@ -105,6 +108,7 @@ type server struct {
 	accountTenants TenantFinder
 	firstAdmins    AccountCreator
 	internalUsers  AccountCreator
+	userLister     UserLister
 
 	linkRequester  LinkRequester
 	emailConfirmer EmailConfirmer
