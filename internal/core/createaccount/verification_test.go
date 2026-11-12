@@ -29,7 +29,7 @@ func TestA_CreatingACustomerAccountSendsOneLink(t *testing.T) {
 	if !verification.ValidShape(mail.Token) {
 		t.Fatalf("the token %q is not the shape of a link", mail.Token)
 	}
-	if n.Link == nil || n.Link.TokenHash != verification.Hash(mail.Token) || !n.Link.ExpiresAt.Equal(now.Add(24*time.Hour)) {
+	if n.Link == nil || n.Link.TokenHash != verification.Hash(mail.Token) || !n.Link.ExpiresAt.Equal(now.Add(24*time.Hour)) || !n.Link.CreatedAt.Equal(now) {
 		t.Fatalf("the store must get only the hash of the link and its expiry: %+v", n.Link)
 	}
 	if strings.Contains(n.Link.TokenHash, mail.Token) {

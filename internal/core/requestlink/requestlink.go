@@ -52,7 +52,7 @@ func (s *Service) Request(ctx context.Context, tenantIdentifier, email string) e
 	if err != nil {
 		return err
 	}
-	issued, err := s.Verifications.Issue(ctx, acct.ID, port.NewLink{TokenHash: link.Hash, ExpiresAt: link.ExpiresAt}, now,
+	issued, err := s.Verifications.Issue(ctx, acct.ID, port.NewLink{TokenHash: link.Hash, CreatedAt: link.CreatedAt, ExpiresAt: link.ExpiresAt}, now,
 		verification.LinksPerWindow, verification.Window)
 	if err != nil || !issued {
 		return err
