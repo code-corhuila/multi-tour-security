@@ -439,6 +439,11 @@ func TestI_AResetOfAPendingAccountVerifiesItAndWritesTheVerifiedFact(t *testing.
 	if got := w.events(t); got["AccountEmailVerified"] != 1 || got["PasswordReset"] != 1 {
 		t.Fatalf("events = %v", got)
 	}
+	// commercial-reservation reads the tenant from the payload, not only from the envelope (spec 006, RN-SEC-006-11)
+	var payloadTenant string
+	if err := w.pool.QueryRow(ctx, `SELECT payload->>'tenantId' FROM security.outbox_event WHERE event_type = 'AccountEmailVerified'`).Scan(&payloadTenant); err != nil || payloadTenant != tenant {
+		t.Fatalf("the payload of the fact carries the tenant %q (%v), want %q", payloadTenant, err, tenant)
+	}
 }
 
 func TestI_AnActiveAccountIsNotMarkedVerifiedByAReset(t *testing.T) {
