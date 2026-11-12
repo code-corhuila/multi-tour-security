@@ -8,6 +8,8 @@ import (
 // NewLink is a verification link as the store keeps it: only the hash, never the link.
 type NewLink struct {
 	TokenHash string
+	// CreatedAt is the instant of the first link of an account, written with it; Issue takes it from its own clock.
+	CreatedAt time.Time
 	ExpiresAt time.Time
 }
 

@@ -142,7 +142,7 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 		if link, err = verification.New(s.Random, s.Clock()); err != nil {
 			return port.Registered{}, false, err
 		}
-		n.Pending, n.Link = true, &port.NewLink{TokenHash: link.Hash, ExpiresAt: link.ExpiresAt}
+		n.Pending, n.Link = true, &port.NewLink{TokenHash: link.Hash, CreatedAt: link.CreatedAt, ExpiresAt: link.ExpiresAt}
 	}
 	made, err := s.Registry.Create(ctx, n, scope, c.IdempotencyKey)
 	if errors.Is(err, port.ErrKeyTaken) {
