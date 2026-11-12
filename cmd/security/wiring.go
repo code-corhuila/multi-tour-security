@@ -12,6 +12,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/adapter/postgres"
 	"github.com/code-corhuila/multi-tour-security/internal/adapter/smtpmail"
 	"github.com/code-corhuila/multi-tour-security/internal/core/changepassword"
+	"github.com/code-corhuila/multi-tour-security/internal/core/changestatus"
 	"github.com/code-corhuila/multi-tour-security/internal/core/createaccount"
 	"github.com/code-corhuila/multi-tour-security/internal/core/listusers"
 	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
@@ -59,6 +60,7 @@ func build(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Handler, *
 	return httpadapter.New(httpadapter.NewVerifier(cfg.publicKey), logger,
 		httpadapter.WithSignIn(signIn), httpadapter.WithRefresh(renewal), httpadapter.WithChangePassword(firstPassword),
 		httpadapter.WithCreateAccount(newAccounts, tenants), httpadapter.WithCreateFirstAdministrator(newAccounts), httpadapter.WithCreateInternalUser(newAccounts), httpadapter.WithListInternalUsers(&listusers.Service{Directory: postgres.NewUserDirectory(pool)}),
+		httpadapter.WithChangeUserStatus(&changestatus.Service{Store: postgres.NewUserStatus(pool), Clock: time.Now}),
 		httpadapter.WithOutbox(events),
 		httpadapter.WithTenantEvents(&tenantevent.Service{Tenants: tenants}),
 		httpadapter.WithLinkRequests(askForLink, background), httpadapter.WithEmailConfirmation(confirmEmail)), background, nil

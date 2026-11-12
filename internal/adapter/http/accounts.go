@@ -81,6 +81,10 @@ type accountBody struct {
 	// TemporaryCredentialUntil is the end of a temporary credential, never the credential; absent for an ordinary one.
 	TemporaryCredentialUntil *time.Time `json:"temporaryCredentialUntil,omitempty"`
 	CreatedAt                time.Time  `json:"createdAt"`
+	// the last change of status: who, when and why; absent for an account that never changed
+	StatusChangedAt *time.Time `json:"statusChangedAt,omitempty"`
+	StatusChangedBy string     `json:"statusChangedBy,omitempty"`
+	StatusReason    string     `json:"statusReason,omitempty"`
 }
 
 // answerAccount is the only place where the answer of the use case that makes accounts becomes HTTP: 201 for a new
@@ -143,7 +147,13 @@ func toAccountBody(reg port.Registered) (accountBody, error) {
 		u := reg.Account.TemporaryUntil.UTC()
 		until = &u
 	}
+	var changedAt *time.Time
+	if !reg.Changed.At.IsZero() {
+		c := reg.Changed.At.UTC()
+		changedAt = &c
+	}
 	return accountBody{
+		StatusChangedAt: changedAt, StatusChangedBy: reg.Changed.By, StatusReason: reg.Changed.Reason,
 		TemporaryCredentialUntil: until,
 		AccountID:                reg.Account.ID, TenantID: reg.Account.TenantID, FullName: reg.FullName, Email: reg.Account.EmailNormalized,
 		Phone: reg.Phone, Roles: []string{reg.Role}, AccountStatus: status, EmailVerified: reg.EmailVerified,
