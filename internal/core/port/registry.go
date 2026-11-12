@@ -27,6 +27,9 @@ type NewAccount struct {
 	Role            string
 	TemporaryUntil  time.Time
 	CreatedBy       string
+	// Pending makes the account wait for its e-mail to be verified; Link is then the first link, written with it.
+	Pending bool
+	Link    *NewLink
 }
 
 // Registered is an account as the store keeps it, with the data the answer of a creation shows. The adapter that
