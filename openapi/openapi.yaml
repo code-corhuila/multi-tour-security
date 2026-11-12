@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Multitour security
-  version: 0.3.0
+  version: 0.4.0
   description: >
     The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
     (ADR-004 D7). It carries only the operations the service implements; every story adds its operations here
@@ -43,7 +43,10 @@ paths:
         E-mail and password of an account of the tenant of the link /t/{identifier}. Every refusal (wrong password,
         unknown e-mail, account of another tenant, unknown tenant, blocked account, inactive account) is the same 401.
         A temporary credential gets a token with empty roles, access password-change and no refresh token; the
-        Administrator of an inactive tenant gets access restricted and no refresh token.
+        Administrator of an inactive tenant gets access restricted and no refresh token. A PENDING account (HU-SEC-003)
+        that gives its right password gets 403 with details naming the field email and the message EMAIL_NOT_VERIFIED,
+        and no token; with a wrong password it gets the same 401 as everyone, so nothing tells a stranger that the
+        e-mail has an account.
       operationId: signIn
       tags: [Sessions]
       security: []
@@ -70,6 +73,8 @@ paths:
           $ref: '#/components/responses/Error'
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
         "413":
           $ref: '#/components/responses/Error'
         "415":
@@ -139,9 +144,10 @@ paths:
       summary: Create a Final Customer account in the tenant of a link
       description: >
         A person creates the account of a Final Customer inside the tenant of the link /t/{identifier}: the tenant is
-        the one of the path and nothing in the body changes it. The account is created ACTIVE with the role
-        FINAL_CUSTOMER and an ordinary password. The e-mail is not verified yet (HU-SEC-003), so emailVerified is false
-        and the account can sign in all the same. The e-mail is lower-cased and trimmed; the same e-mail in another
+        the one of the path and nothing in the body changes it. The account is created PENDING with the role
+        FINAL_CUSTOMER, an ordinary password and emailVerified false, and a link that lasts 24 hours is sent to the
+        e-mail (HU-SEC-003); it cannot sign in until it verifies the e-mail. A failed send is recorded and the answer is
+        still 201. A repeat with the same key sends no second link. The e-mail is lower-cased and trimmed; the same e-mail in another
         tenant is another account, and in the same tenant it is refused with 422, also when the existing account is
         inactive. A tenant that does not exist is 404; one that is not ACTIVE is 422 and creates nothing. A password that
         breaks the policy or a confirmation that differs is 400 with the field in details. A repeat with the same
@@ -664,7 +670,7 @@ components:
           items:
             type: string
             enum: [FINAL_CUSTOMER, TENANT_ADMINISTRATOR, OPERATIONAL_COLLABORATOR, MANAGER, ACCOUNTANT, ANALYST]
-        accountStatus: {type: string, enum: [ACTIVE, INACTIVE]}
+        accountStatus: {type: string, enum: [PENDING, ACTIVE, INACTIVE]}
         emailVerified: {type: boolean}
         temporaryCredentialUntil: {type: string, format: date-time, description: Present while a temporary credential is in force}
         createdAt: {type: string, format: date-time}

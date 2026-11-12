@@ -140,3 +140,28 @@ func TestC_LogsShowNoCredentialEvenWhenTheBodyIsMalformedTooLargeOrOfTheWrongTyp
 		}
 	}
 }
+
+func TestC_APendingAccountWithItsPasswordGets403AskingToVerifyTheEmailAndNoToken(t *testing.T) {
+	svc := &fakeSignIn{err: signin.ErrEmailNotVerified}
+	rec := post(signInHandler(svc, io.Discard), tenantRoute, "application/json", goodBody, "trace-1")
+	var env envelope
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	if rec.Code != http.StatusForbidden || env.Error != "FORBIDDEN" || env.TraceID != "trace-1" || rec.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	if len(env.Details) != 1 || env.Details[0].Field != "email" || env.Details[0].Message != "EMAIL_NOT_VERIFIED" {
+		t.Fatalf("details = %+v, want the one that lets the portal offer a new link", env.Details)
+	}
+	if strings.Contains(rec.Body.String(), "accessToken") || rec.Header().Get("WWW-Authenticate") != "" {
+		t.Fatalf("a refusal that asks to verify gives no token and is not an authentication challenge: %s %v", rec.Body, rec.Header())
+	}
+}
+
+func TestC_TheGenericRefusalIsStillTheOnlyOneForEverythingElse(t *testing.T) {
+	rec := post(signInHandler(&fakeSignIn{err: signin.ErrRefused}, io.Discard), tenantRoute, "application/json", goodBody, "trace-1")
+	var env envelope
+	_ = json.Unmarshal(rec.Body.Bytes(), &env)
+	if rec.Code != http.StatusUnauthorized || env.Error != "UNAUTHORIZED" || len(env.Details) != 0 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+}

@@ -23,6 +23,10 @@ type envelope struct {
 	Error   string `json:"error"`
 	Message string `json:"message"`
 	TraceID string `json:"traceId"`
+	Details []struct {
+		Field   string `json:"field"`
+		Message string `json:"message"`
+	} `json:"details"`
 }
 
 func newKey(t *testing.T) *rsa.PrivateKey {

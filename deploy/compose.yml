@@ -43,6 +43,15 @@ services:
       DATABASE_URL: postgres://security_app:${SECURITY_APP_PASSWORD:?SECURITY_APP_PASSWORD is required, set it in env/<environment>.env}@postgres:5432/${PG_DATABASE:?PG_DATABASE is required, set it in env/<environment>.env}
       JWT_PRIVATE_KEY_FILE: /run/keys/private.pem
       JWT_PUBLIC_KEY_FILE: /run/keys/public.pem
+      # The e-mail that carries a credential (ADR-004 D3). Nothing is guessed: development points them at Mailpit in
+      # env/dev.env, and qa and main at the provider of the environment. TLS is required unless the environment says it is not.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-true}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
     volumes:
       - ${JWT_KEYS_DIR:?JWT_KEYS_DIR is required, the directory with private.pem and public.pem}:/run/keys:ro
     expose:
@@ -53,6 +62,24 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
+    restart: unless-stopped
+    networks: [platform]
+
+  mailpit:
+    # Development only: it receives every e-mail and sends none, so a verification link can be read without a real mailbox
+    # (ADR-004 D3). It does not start with `up`; the development environment turns it on with COMPOSE_PROFILES=mail-capture.
+    # It declares expose and never ports (norm 5.6.1): the web page of the captured mail is read from inside the network.
+    image: axllent/mailpit:v1.21.8
+    profiles: [mail-capture]
+    expose:
+      - "1025"
+      - "8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
     networks: [platform]
 

@@ -61,6 +61,9 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		)
 	}
 
+	// a pending account that gives its right password is told to verify its e-mail
+	scenarios = append(scenarios, scenario{http.MethodPost, tenantRoute, "application/json", goodBody, &fakeSignIn{err: signin.ErrEmailNotVerified}, nil, nil, "", http.StatusForbidden})
+
 	bigRefresh := `{"refreshToken":"` + strings.Repeat("r", 4200) + `"}`
 	for _, r := range []struct {
 		contentType, body string
@@ -210,6 +213,7 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 	}{
 		{"application/json", customerBody, &fakeCreator{reg: registered(), created: true}, known, http.StatusCreated},
 		{"application/json", customerBody, &fakeCreator{reg: registered()}, known, http.StatusOK},
+		{"application/json", customerBody, &fakeCreator{reg: pendingRegistered(), created: true}, known, http.StatusCreated},
 		{"application/json", `{"firstName":`, &fakeCreator{}, known, http.StatusBadRequest},
 		{"application/json", customerBody, &fakeCreator{err: &createaccount.FieldError{Field: "password", Err: errors.New("weak")}}, known, http.StatusBadRequest},
 		{"application/json", customerBody, &fakeCreator{}, unknown, http.StatusNotFound},
