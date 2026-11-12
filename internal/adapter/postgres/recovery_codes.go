@@ -153,7 +153,7 @@ WITH used AS (
 ), verified AS (
     INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, payload, correlation_id, occurred_at)
     SELECT tenant_id, 'AccountEmailVerified', identity_id,
-           jsonb_build_object('accountId', identity_id, 'email', email_normalized,
+           jsonb_build_object('accountId', identity_id, 'tenantId', tenant_id, 'email', email_normalized,
                'verifiedAt', to_char($4::timestamptz AT TIME ZONE 'UTC', ` + utcTime + `)), $5, $4::timestamptz
     FROM changed WHERE $7::boolean RETURNING 1
 )
