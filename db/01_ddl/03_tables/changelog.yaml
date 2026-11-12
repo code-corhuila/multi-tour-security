@@ -70,3 +70,20 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+  - changeSet:
+      id: security-ddl-tables-005
+      author: Molina211
+      labels: "HU-SEC-006,ddl,tables"
+      comment: "The special permissions of a user and the optional roles of a tenant (HU-SEC-006, plan D-03 and D-04)."
+      changes:
+        - sqlFile:
+            path: 005_create_permissions_and_optional_roles.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/005_create_permissions_and_optional_roles.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

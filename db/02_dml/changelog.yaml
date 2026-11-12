@@ -16,3 +16,20 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+  - changeSet:
+      id: security-dml-002
+      author: Molina211
+      labels: "HU-SEC-006,dml"
+      comment: "The tenants that already use an optional role start with it enabled (HU-SEC-006, spec RN-SEC-005-15, plan D-04)."
+      changes:
+        - sqlFile:
+            path: 002_enable_optional_roles_in_use.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../05_rollbacks/02_dml/002_enable_optional_roles_in_use.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
