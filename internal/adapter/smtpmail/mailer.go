@@ -18,7 +18,10 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 )
 
-var _ port.Mailer = (*Mailer)(nil)
+var (
+	_ port.Mailer         = (*Mailer)(nil)
+	_ port.RecoveryMailer = (*Mailer)(nil)
+)
 
 // defaultTimeout bounds an exchange, whatever longer deadline its caller has.
 const defaultTimeout = 30 * time.Second
@@ -45,16 +48,44 @@ func (m *Mailer) SendVerification(ctx context.Context, mm port.Mail) error {
 	if !plainAddress(mm.To) {
 		return &Error{Text: "the recipient is not one e-mail address"}
 	}
+	id, err := m.messageID()
+	if err != nil {
+		return err
+	}
+	raw, _ := buildMessage(m.c.From, m.c.PublicBaseURL, mm, time.Now().UTC(), id)
+	return m.send(ctx, mm.To, raw, mm.Token, "[link]")
+}
+
+// SendRecoveryCode delivers the e-mail with the recovery code, or says why not (HU-SEC-004, plan D-09). The error never holds
+// the code, the address of the person or the password: it is recorded and logged.
+func (m *Mailer) SendRecoveryCode(ctx context.Context, rm port.RecoveryMail) error {
+	if !plainAddress(rm.To) {
+		return &Error{Text: "the recipient is not one e-mail address"}
+	}
+	id, err := m.messageID()
+	if err != nil {
+		return err
+	}
+	return m.send(ctx, rm.To, buildRecoveryMessage(m.c.From, rm, time.Now().UTC(), id), rm.Code, "[code]")
+}
+
+// messageID is a random identifier in the domain of the platform address.
+func (m *Mailer) messageID() (string, error) {
 	id := make([]byte, 12)
 	if _, err := rand.Read(id); err != nil {
-		return &Error{Text: "no randomness for the message id", temp: true}
+		return "", &Error{Text: "no randomness for the message id", temp: true}
 	}
 	domain := m.c.From[strings.LastIndexByte(m.c.From, '@')+1:]
-	raw, _ := buildMessage(m.c.From, m.c.PublicBaseURL, mm, time.Now().UTC(), hex.EncodeToString(id)+"@"+domain)
+	return hex.EncodeToString(id) + "@" + domain, nil
+}
+
+// send delivers a message within the default timeout and turns a failure into an Error that drops the secret it carried
+// (shown as label), the address of the person and the password.
+func (m *Mailer) send(ctx context.Context, to string, raw []byte, secret, label string) error {
 	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
 	defer cancel()
-	if err := m.deliver(ctx, mm.To, raw); err != nil {
-		return m.fail(ctx, err, mm)
+	if err := m.deliver(ctx, to, raw); err != nil {
+		return m.fail(ctx, err, secret, label, to)
 	}
 	return nil
 }
@@ -75,7 +106,7 @@ func (m *Mailer) deliver(ctx context.Context, to string, raw []byte) error {
 		return err
 	}
 	defer conn.Close()
-	deadline, _ := ctx.Deadline() // always set: SendVerification bounds the exchange
+	deadline, _ := ctx.Deadline() // always set: send bounds the exchange
 	_ = conn.SetDeadline(deadline)
 	defer context.AfterFunc(ctx, func() { _ = conn.Close() })() // a cancelled caller does not wait for the server
 
@@ -126,10 +157,10 @@ func (m *Mailer) deliver(ctx context.Context, to string, raw []byte) error {
 	return nil
 }
 
-// fail turns what the exchange returned into an Error that keeps the code and the reason and drops the link, the address of
+// fail turns what the exchange returned into an Error that keeps the status code and the reason and drops the secret, the address of
 // the person and the password, whatever their case, longest first so that a secret inside another is not left in pieces.
-func (m *Mailer) fail(ctx context.Context, err error, mm port.Mail) error {
-	e := &Error{Text: redact(err.Error(), mm.Token, mm.To, m.c.Password), temp: true}
+func (m *Mailer) fail(ctx context.Context, err error, secret, label, to string) error {
+	e := &Error{Text: redact(err.Error(), secret, label, to, m.c.Password), temp: true}
 	var protocol *textproto.Error
 	if errors.As(err, &protocol) {
 		e.Code, e.temp = protocol.Code, protocol.Code >= 400 && protocol.Code < 500
@@ -140,8 +171,8 @@ func (m *Mailer) fail(ctx context.Context, err error, mm port.Mail) error {
 	return e
 }
 
-func redact(text string, token, to, password string) string {
-	secrets := []struct{ value, label string }{{token, "[link]"}, {to, "[recipient]"}, {password, "[password]"}}
+func redact(text string, secret, label, to, password string) string {
+	secrets := []struct{ value, label string }{{secret, label}, {to, "[recipient]"}, {password, "[password]"}}
 	sort.Slice(secrets, func(i, j int) bool { return len(secrets[i].value) > len(secrets[j].value) })
 	for _, s := range secrets {
 		if s.value == "" {
