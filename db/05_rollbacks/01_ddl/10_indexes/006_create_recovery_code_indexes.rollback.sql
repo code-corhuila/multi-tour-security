@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS security.idx_recovery_code_identity_created_at;
