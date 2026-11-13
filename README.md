@@ -45,6 +45,21 @@ Try it through the gateway (`http://localhost:8080`):
 
 A failed send never fails the registration: it is recorded in `email_verification.send_failed_at` and `send_error` (never with the link) and the person asks again.
 
+## Password recovery
+
+A person who forgot the password asks for a code of 8 digits and chooses a new password with it (HU-SEC-004). The code is sent by e-mail with the same SMTP variables as the verification link, lasts 30 minutes, works once, and only the newest code of an account works. Five wrong tries retire the code; at most 3 codes per hour per account. The database keeps only an HMAC of the code, never the code.
+
+| Variable | Meaning |
+|---|---|
+| `RECOVERY_CODE_KEY` | Secret of the HMAC of the codes, at least 32 bytes (`openssl rand -base64 32`), different in each environment; the service stops at start without it. Never versioned |
+
+Public routes, with no token, for a tenant and, under `/platform/`, for the Platform Administrator:
+
+1. `POST /api/v1/security/public/tenants/{identifier}/password-recoveries` asks for a code and always answers `202`, whether or not the e-mail has an account.
+2. `POST .../password-recoveries/resets` takes `email`, `code`, `newPassword` and `newPasswordConfirmation`. It answers `204`: the password is replaced, the failed-sign-in block is lifted, every session of the account ends and a pending account becomes `ACTIVE`. Every refused code (wrong, used, expired, retired, no account, inactive, other tenant) is the same `422`; a bad shape is `400` with the field.
+
+The facts `PasswordRecoveryRequested`, `PasswordReset`, `PasswordResetFailed` (administrative accounts only) and `AccountSessionsRevoked` go to the outbox in the same statement. What is not built: the e-mail notice to the administrators when an administrative password is reset (HU-WRK-004, job 4).
+
 ## Where the data is
 
 Schema `security`, user `security_app` (it can write only there), in the instance of `multi-tour-infra-postgres`. The control tables are `databasechangelog_security` and `databasechangeloglock_security`. The schema holds the accounts, memberships, sessions, renewal values, the copy of the tenants and the outbox.
@@ -67,7 +82,7 @@ Run beside the server, with the same binary and the variables exported in the sh
 
 ## Still to come
 
-The stories that recover the password and grant special permissions and optional roles: see `07-api/specs/multi-tour-security/` in `multi-tour-docs`.
+The e-mail notice to the administrators of a password reset (HU-WRK-004): see `07-api/specs/multi-tour-security/` in `multi-tour-docs`.
 
 ## Branching
 

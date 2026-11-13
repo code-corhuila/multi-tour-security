@@ -82,7 +82,7 @@ func unreachableMail() smtpmail.Config {
 
 // testConfig is the configuration of a handler under test: fresh keys and mail settings that do not need a server.
 func testConfig(private *rsa.PrivateKey, public *rsa.PublicKey) config {
-	return config{privateKey: private, publicKey: public, mail: unreachableMail()}
+	return config{privateKey: private, publicKey: public, mail: unreachableMail(), recoveryKey: []byte(strings.Repeat("k", 32))}
 }
 
 // newStackOnMail is newStackOn with the mail settings of the test.

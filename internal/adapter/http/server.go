@@ -107,6 +107,13 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 	if s.emailConfirmer != nil {
 		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/email-verifications/confirmations", s.confirmEmail)
 	}
+	if s.recoveryRequester != nil && s.passwordResetter != nil && s.background != nil {
+		// public by design: a person who forgot the password has no token
+		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/password-recoveries", s.askForCode(false))
+		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/password-recoveries/resets", s.resetPassword(false))
+		mux.HandleFunc("POST /api/v1/security/public/platform/password-recoveries", s.askForCode(true))
+		mux.HandleFunc("POST /api/v1/security/public/platform/password-recoveries/resets", s.resetPassword(true))
+	}
 	if s.firstAdmins != nil {
 		mux.Handle("POST /api/v1/security/internal/tenants/{tenantId}/administrators", s.protect(s.requireService(http.HandlerFunc(s.createFirstAdministrator))))
 	}
@@ -133,9 +140,11 @@ type server struct {
 	userStatus       UserStatusChanger
 	credentialIssuer CredentialIssuer
 
-	linkRequester  LinkRequester
-	emailConfirmer EmailConfirmer
-	background     *Background
+	linkRequester     LinkRequester
+	emailConfirmer    EmailConfirmer
+	recoveryRequester RecoveryRequester
+	passwordResetter  PasswordResetter
+	background        *Background
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {

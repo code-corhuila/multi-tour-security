@@ -52,6 +52,8 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-true}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-}
+      # The secret of the HMAC of the recovery codes (HU-SEC-004): the service stops at start without one of 32 bytes.
+      RECOVERY_CODE_KEY: ${RECOVERY_CODE_KEY:-}
     volumes:
       - ${JWT_KEYS_DIR:?JWT_KEYS_DIR is required, the directory with private.pem and public.pem}:/run/keys:ro
     # the shutdown drains the requests and waits for the work after an answer within 20 seconds (cmd/security/main.go)
