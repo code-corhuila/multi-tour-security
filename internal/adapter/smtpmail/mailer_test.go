@@ -51,6 +51,7 @@ type fakeServer struct {
 	quoteSecret     bool // the refusal of the credentials quotes them, as some servers do
 	badQuit         bool // the server answers an error to QUIT after it accepted the message
 	temporary       bool // the refusal of the recipient is a 4xx
+	rejectData      bool // the refusal of the message quotes it whole, as some servers do
 
 	mu         sync.Mutex
 	deliveries []delivery
@@ -173,6 +174,10 @@ func (s *fakeServer) serve(conn net.Conn) {
 					break
 				}
 				body.WriteString(l)
+			}
+			if s.rejectData {
+				say("554 5.6.0 message rejected: %s", strings.ReplaceAll(body.String(), "\r\n", " "))
+				continue
 			}
 			d.data, d.secure, d.authed = body.String(), secure, authed
 			s.mu.Lock()

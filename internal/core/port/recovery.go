@@ -20,7 +20,8 @@ type NewCode struct {
 	ExpiresAt time.Time
 }
 
-// IssueCode asks the store to write a new code for an account. TenantID is empty for the Platform Administrator.
+// IssueCode asks the store to write a new code for an account. TenantID is empty for the Platform Administrator; the store
+// names in its fact the tenant of the account row and ignores this one.
 type IssueCode struct {
 	AccountID     string
 	TenantID      string
@@ -38,7 +39,8 @@ type CodeState struct {
 	WrongTries int
 }
 
-// FailedReset is a refused reset. CodeID is empty when there was no live code to count the try against.
+// FailedReset is a refused reset. CodeID is empty when there was no live code to count the try against. The store names in
+// its fact the tenant of the account row, not TenantID.
 type FailedReset struct {
 	AccountID      string
 	TenantID       string
@@ -49,7 +51,9 @@ type FailedReset struct {
 	CorrelationID  string
 }
 
-// ResetCommand is a reset the person proved with the code. Roles are the roles of the active membership at that moment.
+// ResetCommand is a reset the person proved with the code. Roles are the roles of the active membership at that moment. The
+// store takes the tenant and whether the account is pending from the row it locks, so TenantID, Administrative and Pending
+// are what the use case saw and are not trusted.
 type ResetCommand struct {
 	AccountID      string
 	TenantID       string
