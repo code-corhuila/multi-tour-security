@@ -54,7 +54,7 @@ func build(pool *pgxpool.Pool, cfg config, logger *slog.Logger) (http.Handler, *
 	renewal := &refresh.Service{Tenants: tenants, Accounts: accounts, Sessions: sessions, Signer: signer, Clock: time.Now}
 	firstPassword := &changepassword.Service{Accounts: accounts, Hasher: bcryptadapter.Hasher{}, Clock: time.Now}
 	newAccounts := &createaccount.Service{
-		Tenants: tenants, Accounts: accounts, Registry: postgres.NewRegistry(pool), Hasher: bcryptadapter.Hasher{}, Clock: time.Now,
+		Tenants: tenants, Accounts: accounts, Registry: postgres.NewRegistry(pool), Held: accounts, Hasher: bcryptadapter.Hasher{}, Clock: time.Now,
 		Verifications: links, Mailer: mailer, Random: rand.Reader,
 	}
 	askForLink := &requestlink.Service{Tenants: tenants, Accounts: accounts, Verifications: links, Mailer: mailer, Random: rand.Reader, Clock: time.Now}

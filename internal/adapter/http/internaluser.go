@@ -61,6 +61,8 @@ func takenMessage(reason createaccount.TakenReason) string {
 		return "belongs to an inactive internal user, who can be reactivated"
 	case createaccount.TakenByCustomer:
 		return "belongs to a customer account of this tenant"
+	case createaccount.TakenByPendingCustomer:
+		return "belongs to a customer account of this tenant whose e-mail is not verified yet"
 	case createaccount.TakenByInternalUser:
 		return "already in use by an internal user of this tenant"
 	default:

@@ -20,18 +20,21 @@ const assignedPermissions = `COALESCE((SELECT array_agg(p.permission ORDER BY p.
 			JOIN security.membership pm USING (membership_id) WHERE pm.identity_id = identity.identity_id AND p.revoked_at IS NULL), '{}')`
 
 // the filters are optional: an empty status matches any, and the roles are an array so that one query serves them all
-const userFilters = `WHERE tenant_id = $1::uuid AND ($3 = '' OR identity_status = $3)`
+const userFilters = `WHERE tenant_id = $1::uuid AND ($3 = '' OR ` + effectiveStatus + ` = $3)`
+
+// the status of a user is the one of the team side when the person is also a customer and the team side is off (HU-SEC-008), else the one of the account
+const effectiveStatus = `CASE WHEN r.role_status = 'INACTIVE' THEN 'INACTIVE' ELSE identity_status END`
 
 // the role shown is the smallest by name of the ones the filter lets in; an account with none of them is not listed. Today a user
 // has one internal role (RN-SEC-003-02), so there is nothing to choose; with two the account would still appear once
-const userRole = `JOIN LATERAL (SELECT min(mr.role) AS role FROM security.membership m
+const userRole = `JOIN LATERAL (SELECT min(mr.role) AS role, min(mr.role_status) AS role_status FROM security.membership m
 		JOIN security.membership_role mr USING (membership_id)
 		WHERE m.identity_id = identity.identity_id AND mr.role = ANY($2)) r ON r.role IS NOT NULL`
 
 // List is one query: the page and, in each row, the total of the filter. The hash is not selected, so it cannot leak. The
 // order is the index of the listing, with the identifier as the tie-break, so a page never repeats or skips a user.
 func (d *UserDirectory) List(ctx context.Context, tenantID string, f port.UserFilter, limit, offset int) ([]port.Registered, int, error) {
-	rows, err := d.pool.Query(ctx, `SELECT identity_id::text, COALESCE(tenant_id::text, ''), email_normalized, identity_status, temporary_until,
+	rows, err := d.pool.Query(ctx, `SELECT identity_id::text, COALESCE(tenant_id::text, ''), email_normalized, `+effectiveStatus+`, temporary_until,
 			COALESCE(full_name, ''), COALESCE(phone, ''), email_verified, r.role, created_at, count(*) OVER (),
 			status_changed_at, COALESCE(status_changed_by, ''), COALESCE(status_reason, ''), `+assignedPermissions+`
 		FROM security.identity `+userRole+` `+userFilters+`

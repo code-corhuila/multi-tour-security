@@ -31,7 +31,7 @@ type fakeSessions struct {
 	oldHashes, newHashes []string
 }
 
-func (f *fakeSessions) Open(context.Context, string, string, time.Time) (string, error) {
+func (f *fakeSessions) Open(context.Context, string, string, string, time.Time) (string, error) {
 	return "", errors.New("not used")
 }
 func (f *fakeSessions) Rotate(_ context.Context, oldHash, newHash string, _ time.Time) (port.Renewed, error) {

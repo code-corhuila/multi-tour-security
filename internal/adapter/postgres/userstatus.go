@@ -47,6 +47,32 @@ WITH changed AS (
 )
 SELECT count(*) FROM changed`
 
+// The same change for an account that also holds the customer role: only its internal roles are switched, the account stays active so the
+// person can still sign in as a customer. The trace, the cutoff that cuts every session and the event are the same as above, written
+// or none. The parameters are those of changeStatus.
+const changeTeamSide = `
+WITH changed AS (
+    UPDATE security.membership_role mr SET role_status = $4
+    FROM security.membership m JOIN security.identity i USING (identity_id)
+    WHERE mr.membership_id = m.membership_id AND mr.role = ANY($8) AND mr.role_status = $3
+      AND i.identity_id = $1::uuid AND i.tenant_id = $2::uuid AND i.identity_status = 'ACTIVE'
+    RETURNING i.identity_id
+), touched AS (
+    UPDATE security.identity i SET status_changed_at = $5::timestamptz, status_changed_by = $6, status_reason = $7,
+        sessions_revoked_from = CASE WHEN $4 = 'INACTIVE'
+            THEN GREATEST(COALESCE(i.sessions_revoked_from, $5::timestamptz), $5::timestamptz) ELSE i.sessions_revoked_from END
+    WHERE i.identity_id IN (SELECT identity_id FROM changed)
+    RETURNING i.identity_id, i.tenant_id, i.sessions_revoked_from
+), audit AS (
+    INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, actor_id, reason, payload, correlation_id, occurred_at)
+    SELECT tenant_id, 'AccountSessionsRevoked', identity_id, $9::uuid, $7,
+           jsonb_build_object('accountId', identity_id,
+               'revokedFrom', to_char(sessions_revoked_from AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+           $10, $5::timestamptz
+    FROM touched WHERE $4 = 'INACTIVE'
+)
+SELECT count(DISTINCT identity_id) FROM changed`
+
 // the status a change can start from: only an active user is inactivated and only an inactive one is reactivated
 func startsFrom(to account.Status) (string, string, bool) {
 	switch to {
@@ -76,8 +102,18 @@ func (s *UserStatus) ChangeStatus(ctx context.Context, c port.StatusCommand) (po
 			return port.Registered{}, err
 		}
 	}
+	var double bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM security.membership m JOIN security.membership_role mr USING (membership_id)
+		WHERE m.identity_id = $1::uuid AND mr.role = 'FINAL_CUSTOMER')`, c.AccountID).Scan(&double); err != nil {
+		return port.Registered{}, err
+	}
+	statement := changeStatus
+	if double {
+		// a person who is also a customer loses only the team side (HU-SEC-008, RN-SEC-007-07)
+		statement = changeTeamSide
+	}
 	var changed int
-	if err := tx.QueryRow(ctx, changeStatus, c.AccountID, c.TenantID, from, to, c.Now, c.By, c.Reason, internalRoleNames, c.ActorID, c.CorrelationID).Scan(&changed); err != nil {
+	if err := tx.QueryRow(ctx, statement, c.AccountID, c.TenantID, from, to, c.Now, c.By, c.Reason, internalRoleNames, c.ActorID, c.CorrelationID).Scan(&changed); err != nil {
 		return port.Registered{}, err
 	}
 	if changed == 0 {
@@ -107,7 +143,7 @@ func (s *UserStatus) ChangeStatus(ctx context.Context, c port.StatusCommand) (po
 func keepOneAdministrator(ctx context.Context, tx pgx.Tx, c port.StatusCommand) error {
 	rows, err := tx.Query(ctx, `SELECT i.identity_id::text FROM security.identity i
 		WHERE i.tenant_id = $1::uuid AND i.identity_status = 'ACTIVE' AND EXISTS (SELECT 1 FROM security.membership m
-			JOIN security.membership_role mr USING (membership_id) WHERE m.identity_id = i.identity_id AND m.membership_status = 'ACTIVE' AND mr.role = 'TENANT_ADMINISTRATOR')
+			JOIN security.membership_role mr USING (membership_id) WHERE m.identity_id = i.identity_id AND m.membership_status = 'ACTIVE' AND mr.role = 'TENANT_ADMINISTRATOR' AND mr.role_status = 'ACTIVE')
 		ORDER BY i.identity_id FOR NO KEY UPDATE OF i`, c.TenantID)
 	if err != nil {
 		return err
@@ -136,7 +172,7 @@ func readUser(ctx context.Context, q pgx.Tx, tenantID, id string) (port.Register
 	var u port.Registered
 	var status string
 	var temporary, changedAt *time.Time
-	err := q.QueryRow(ctx, `SELECT identity_id::text, COALESCE(tenant_id::text, ''), email_normalized, identity_status, temporary_until,
+	err := q.QueryRow(ctx, `SELECT identity_id::text, COALESCE(tenant_id::text, ''), email_normalized, `+effectiveStatus+`, temporary_until,
 			COALESCE(full_name, ''), COALESCE(phone, ''), email_verified, r.role, created_at,
 			status_changed_at, COALESCE(status_changed_by, ''), COALESCE(status_reason, ''), `+assignedPermissions+`
 		FROM security.identity `+userRole+` WHERE tenant_id = $1::uuid AND identity_id = $3::uuid`, tenantID, internalRoleNames, id).

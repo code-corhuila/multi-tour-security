@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Multitour security
-  version: 0.7.0
+  version: 0.8.0
   description: >
     The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
     (ADR-004 D7). It carries only the operations the service implements; every story adds its operations here
@@ -1271,6 +1271,14 @@ components:
       required: [email, password]
       additionalProperties: false
       properties:
+        context:
+          type: string
+          enum: [CUSTOMER, TEAM]
+          description: |
+            The side the person works from (HU-SEC-008). It matters only for an account that holds FINAL_CUSTOMER and an
+            internal role: the token then carries the roles of that side only, and with no context the customer side.
+            An account with one side gets that side whatever is asked. The renewals of the session keep it. Ignored at the
+            platform.
         email:
           type: string
           minLength: 3

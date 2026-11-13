@@ -20,8 +20,10 @@ const (
 	TakenByInternalUser TakenReason = iota + 1
 	// TakenByInactiveInternalUser is an internal user who can be reactivated instead of registered again.
 	TakenByInactiveInternalUser
-	// TakenByCustomer is a Final Customer account; until HU-SEC-008 adds the internal role to it, it is refused.
+	// TakenByCustomer is an inactive Final Customer account, which a role does not bring back.
 	TakenByCustomer
+	// TakenByPendingCustomer is a Final Customer account whose e-mail is not verified yet: the Administrator waits for the person to verify it.
+	TakenByPendingCustomer
 )
 
 // EmailTakenError is the refusal of a taken e-mail together with its reason. It is also port.ErrEmailTaken, so whoever only
@@ -37,14 +39,15 @@ func (s *Service) whyTaken(ctx context.Context, kind Kind, existing account.Acco
 	if kind != InternalUser {
 		return port.ErrEmailTaken
 	}
-	roles, err := s.Accounts.RolesOf(ctx, existing.ID)
+	roles, err := s.rolesHeld(ctx, existing.ID)
 	if err != nil {
 		return err
 	}
-	for _, role := range roles {
-		if role == roleFinalCustomer {
-			return &EmailTakenError{Reason: TakenByCustomer}
+	if isCustomerOnly(roles) {
+		if existing.Status == account.Pending {
+			return &EmailTakenError{Reason: TakenByPendingCustomer}
 		}
+		return &EmailTakenError{Reason: TakenByCustomer}
 	}
 	// like the answer of the routes, a status this code does not know is refused as a failure, not read as an active user
 	switch existing.Status {

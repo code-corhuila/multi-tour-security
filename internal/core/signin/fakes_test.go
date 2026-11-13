@@ -92,17 +92,19 @@ func (f *fakeAccounts) PermissionsOf(_ context.Context, id string) ([]string, er
 
 type fakeSessions struct {
 	opened []string // the hash of each first value
+	sides  []string // the side each session was opened for
 	owners []string
 	at     []time.Time
 	err    error
 }
 
-func (f *fakeSessions) Open(_ context.Context, accountID, hash string, at time.Time) (string, error) {
+func (f *fakeSessions) Open(_ context.Context, accountID, hash, side string, at time.Time) (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}
 	f.opened = append(f.opened, hash)
 	f.owners = append(f.owners, accountID)
+	f.sides = append(f.sides, side)
 	f.at = append(f.at, at)
 	return "session-1", nil
 }
