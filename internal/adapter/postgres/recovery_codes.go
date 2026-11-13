@@ -25,6 +25,16 @@ func NewRecoveryCodes(pool *pgxpool.Pool) *RecoveryCodes { return &RecoveryCodes
 // utcTime is how an instant is written in a payload, as the other facts of this service write it.
 const utcTime = `'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'`
 
+// The name shown as the sender of the notice is the commercial name of the tenant, or the platform's when it has none or the account has no
+// tenant: the rule of tenant.Copy.DisplayName, written here because the fact is built inside the statement of the reset.
+const (
+	tenantNameOfAccount = `COALESCE((SELECT c.commercial_name FROM security.tenant_copy c WHERE c.tenant_id = i.tenant_id), 'Multitour')`
+	tenantNameOfChanged = `COALESCE((SELECT c.commercial_name FROM security.tenant_copy c WHERE c.tenant_id = changed.tenant_id), 'Multitour')`
+	// the roles of the active membership, whatever their own status, as RolesHeld reads them
+	rolesOfAccount = `COALESCE((SELECT jsonb_agg(mr.role ORDER BY mr.role) FROM security.membership m
+		JOIN security.membership_role mr USING (membership_id) WHERE m.identity_id = i.identity_id AND m.membership_status = 'ACTIVE'), '[]'::jsonb)`
+)
+
 // Issue counts, retires and writes in one transaction that holds the row of the account, so codes asked for at the same
 // time take turns: the third passes, the fourth finds three and writes nothing. The fact PasswordRecoveryRequested is written
 // with the code. An inactive account, or one that does not exist, gets no code and no error.
@@ -100,8 +110,8 @@ WITH counted AS (
 )
 INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, reason, payload, correlation_id, occurred_at)
 SELECT i.tenant_id, 'PasswordResetFailed', i.identity_id, $3::text,
-       jsonb_build_object('accountId', i.identity_id, 'reason', $3::text,
-           'failedAt', to_char($4::timestamptz AT TIME ZONE 'UTC', ` + utcTime + `)),
+       jsonb_build_object('accountId', i.identity_id, 'reason', $3::text, 'email', i.email_normalized, 'tenantName', ` + tenantNameOfAccount + `,
+           'roles', ` + rolesOfAccount + `, 'failedAt', to_char($4::timestamptz AT TIME ZONE 'UTC', ` + utcTime + `)),
        $6, $4::timestamptz
 FROM security.identity i WHERE i.identity_id = $1::uuid AND $7::boolean`
 
@@ -137,7 +147,7 @@ WITH used AS (
 ), reset AS (
     INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, payload, correlation_id, occurred_at)
     SELECT tenant_id, 'PasswordReset', identity_id,
-           jsonb_build_object('accountId', identity_id, 'roles', to_jsonb($6::text[]),
+           jsonb_build_object('accountId', identity_id, 'roles', to_jsonb($6::text[]), 'email', email_normalized, 'tenantName', ` + tenantNameOfChanged + `,
                'resetAt', to_char($4::timestamptz AT TIME ZONE 'UTC', ` + utcTime + `)), $5, $4::timestamptz
     FROM changed RETURNING 1
 ), verified AS (
