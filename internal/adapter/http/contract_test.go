@@ -24,6 +24,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/optionalrole"
 	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
+	"github.com/code-corhuila/multi-tour-security/internal/core/recoverpassword"
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenantevent"
 	"github.com/code-corhuila/multi-tour-security/internal/core/verifyemail"
@@ -270,6 +271,48 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 	} {
 		handler := verificationHandler(&fakeRequester{}, &fakeConfirmer{err: c.err}, background(time.Second), io.Discard)
 		run(handler, http.MethodPost, confirmRoute, c.contentType, c.body, "", c.want)
+	}
+
+	// the password recovery (HU-SEC-004): asking is always 202 when the body is well formed, and a reset has its own answers,
+	// for a tenant and for the platform
+	bigRecoveryAsk := `{"email":"` + strings.Repeat("a", 4200) + `"}`
+	bigReset := `{"email":"ana@example.com","code":"` + resetCode + `","newPassword":"` + strings.Repeat("p", 4200) + `","newPasswordConfirmation":"x"}`
+	for _, route := range []string{askRecoveryRoute, askPlatformRoute} {
+		for _, c := range []struct {
+			contentType, body string
+			err               error
+			want              int
+		}{
+			{"application/json", askRecoveryBody, nil, http.StatusAccepted},
+			{"application/json", askRecoveryBody, errors.New("boom"), http.StatusAccepted},
+			{"application/json", `{"email":`, nil, http.StatusBadRequest},
+			{"application/json", `{"email":"no-at-sign"}`, nil, http.StatusBadRequest},
+			{"text/plain", askRecoveryBody, nil, http.StatusUnsupportedMediaType},
+			{"application/json", bigRecoveryAsk, nil, http.StatusRequestEntityTooLarge},
+		} {
+			run(recoveryHandler(&fakeRecoveryRequester{err: c.err}, &fakeResetter{}, background(time.Second), io.Discard), http.MethodPost, route, c.contentType, c.body, "", c.want)
+		}
+	}
+	for _, route := range []string{resetRoute, resetPlatformRoute} {
+		for _, c := range []struct {
+			contentType, body string
+			err               error
+			want              int
+		}{
+			{"application/json", resetBody, nil, http.StatusNoContent},
+			{"application/json", `{"email":`, nil, http.StatusBadRequest},
+			{"application/json", resetBody, &recoverpassword.FieldError{Field: "newPassword"}, http.StatusBadRequest},
+			{"application/json", resetBody, recoverpassword.ErrCodeRefused, http.StatusUnprocessableEntity},
+			{"application/json", resetBody, recoverpassword.ErrTenantNotFound, http.StatusNotFound},
+			{"application/json", bigReset, nil, http.StatusRequestEntityTooLarge},
+			{"text/plain", resetBody, nil, http.StatusUnsupportedMediaType},
+			{"application/json", resetBody, errors.New("boom"), http.StatusInternalServerError},
+		} {
+			if route == resetPlatformRoute && c.want == http.StatusNotFound {
+				continue // the platform has no tenant to be unknown
+			}
+			run(recoveryHandler(&fakeRecoveryRequester{}, &fakeResetter{err: c.err}, background(time.Second), io.Discard), http.MethodPost, route, c.contentType, c.body, "", c.want)
+		}
 	}
 
 	// the first Administrator of a tenant, for the saga: only a service, and every answer of the use case
