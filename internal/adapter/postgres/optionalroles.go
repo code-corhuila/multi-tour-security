@@ -58,7 +58,7 @@ const activeHolders = `
 SELECT count(*) FROM security.identity i
 JOIN security.membership m USING (identity_id)
 JOIN security.membership_role r USING (membership_id)
-WHERE i.tenant_id = $1::uuid AND i.identity_status = 'ACTIVE' AND m.membership_status = 'ACTIVE' AND r.role = $2`
+WHERE i.tenant_id = $1::uuid AND i.identity_status = 'ACTIVE' AND m.membership_status = 'ACTIVE' AND r.role_status = 'ACTIVE' AND r.role = $2`
 
 // List gives the three optional roles, in a fixed order: each with its row, or not enabled when the tenant never touched it.
 func (s *OptionalRoles) List(ctx context.Context, tenantID string) ([]port.OptionalRoleState, error) {

@@ -58,8 +58,10 @@ type Service struct {
 	Tenants  port.Tenants
 	Accounts port.Accounts
 	Registry port.AccountRegistry
-	Hasher   port.Hasher
-	Clock    func() time.Time
+	// Held lists the roles of an account whatever their status; when nil, the roles that are active now stand for them.
+	Held   port.RolesHeld
+	Hasher port.Hasher
+	Clock  func() time.Time
 	// Verifications, Mailer and Random are needed to create a customer account, which waits for its e-mail to be verified.
 	Verifications port.Verifications
 	Mailer        port.Mailer
@@ -113,10 +115,10 @@ func (s *Service) Create(ctx context.Context, c Command) (port.Registered, bool,
 		return port.Registered{}, false, refuse("email", errInvalid)
 	}
 	if existing, taken, err := s.Accounts.FindByEmail(ctx, c.TenantID, email); err != nil || taken {
-		if err == nil {
-			err = s.whyTaken(ctx, c.Kind, existing)
+		if err != nil {
+			return port.Registered{}, false, err
 		}
-		return port.Registered{}, false, err
+		return s.whenTaken(ctx, c, existing, scope)
 	}
 	// the hash is the expensive step, so it comes after every refusal that costs nothing
 	hash, err := s.Hasher.Hash(c.Password)

@@ -17,7 +17,10 @@ import (
 // ErrAccountNotFound is an operation on an account that does not exist; a lookup answers found=false instead.
 var ErrAccountNotFound = errors.New("the account does not exist")
 
-var _ port.Accounts = (*Accounts)(nil)
+var (
+	_ port.Accounts  = (*Accounts)(nil)
+	_ port.RolesHeld = (*Accounts)(nil)
+)
 
 // Accounts reads and updates security.identity.
 type Accounts struct {
@@ -176,11 +179,20 @@ func (r *Accounts) PermissionsOf(ctx context.Context, id string) ([]string, erro
 	return held, err
 }
 
-// RolesOf gives the roles of the active membership of the account, by name.
+// RolesOf gives the active roles of the active membership of the account, by name: the team side of a person who is also a customer can be off.
 func (r *Accounts) RolesOf(ctx context.Context, id string) ([]string, error) {
+	return r.roles(ctx, id, `AND mr.role_status = 'ACTIVE'`)
+}
+
+// RolesHeld gives the roles of the active membership whatever their status: a person whose team side is off still holds the internal role.
+func (r *Accounts) RolesHeld(ctx context.Context, id string) ([]string, error) {
+	return r.roles(ctx, id, ``)
+}
+
+func (r *Accounts) roles(ctx context.Context, id, filter string) ([]string, error) {
 	rows, err := r.pool.Query(ctx, `SELECT mr.role FROM security.membership m
 		JOIN security.membership_role mr USING (membership_id)
-		WHERE m.identity_id = $1::uuid AND m.membership_status = 'ACTIVE' ORDER BY mr.role`, id)
+		WHERE m.identity_id = $1::uuid AND m.membership_status = 'ACTIVE' `+filter+` ORDER BY mr.role`, id)
 	if err != nil {
 		return nil, err
 	}
