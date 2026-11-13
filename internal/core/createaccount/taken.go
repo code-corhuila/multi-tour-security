@@ -8,9 +8,6 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/port"
 )
 
-// roleFinalCustomer is the role of a person who signs up by themselves.
-const roleFinalCustomer = "FINAL_CUSTOMER"
-
 // TakenReason says whose an e-mail that is already in use is, so that the Administrator who registers a user knows what to
 // do about it (spec 003, RN-SEC-003-05).
 type TakenReason int

@@ -27,7 +27,7 @@ type rule struct {
 func rules(k Kind) (rule, bool) {
 	switch k {
 	case Customer:
-		return rule{scope: "customer", role: roleFinalCustomer, selfService: true, confirmed: true, activeTenant: true, pending: true, createdBy: "customer"}, true
+		return rule{scope: "customer", role: account.RoleFinalCustomer, selfService: true, confirmed: true, activeTenant: true, pending: true, createdBy: "customer"}, true
 	case InternalUser:
 		return rule{scope: "user", confirmed: true, temporary: true, activeTenant: true, createdBy: "tenant-administrator", hasActor: true}, true
 	case FirstAdministrator:
