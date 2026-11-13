@@ -114,8 +114,8 @@ refused() { # fragment, statement
 }
 # every table with a foreign key to these must be in the list, or the TRUNCATE fails and the probes say so
 clean() {
-  # the key table (HU-SEC-002) and the link table (HU-SEC-003) reference identity, so they join the TRUNCATE once they exist
-  extra=$(psql_admin -c "SELECT CASE WHEN to_regclass('security.idempotency_key') IS NULL THEN '' ELSE ', security.idempotency_key' END || CASE WHEN to_regclass('security.email_verification') IS NULL THEN '' ELSE ', security.email_verification' END || CASE WHEN to_regclass('security.membership_permission') IS NULL THEN '' ELSE ', security.membership_permission' END || CASE WHEN to_regclass('security.tenant_optional_role') IS NULL THEN '' ELSE ', security.tenant_optional_role' END") || return 1
+  # the key table (HU-SEC-002), the link table (HU-SEC-003) and the code table (HU-SEC-004) reference identity, so they join the TRUNCATE once they exist
+  extra=$(psql_admin -c "SELECT CASE WHEN to_regclass('security.idempotency_key') IS NULL THEN '' ELSE ', security.idempotency_key' END || CASE WHEN to_regclass('security.email_verification') IS NULL THEN '' ELSE ', security.email_verification' END || CASE WHEN to_regclass('security.recovery_code') IS NULL THEN '' ELSE ', security.recovery_code' END || CASE WHEN to_regclass('security.membership_permission') IS NULL THEN '' ELSE ', security.membership_permission' END || CASE WHEN to_regclass('security.tenant_optional_role') IS NULL THEN '' ELSE ', security.tenant_optional_role' END") || return 1
   psql_admin -c "TRUNCATE security.refresh_token, security.session, security.membership_role, security.membership, security.identity, security.tenant_copy$extra" >/dev/null || { echo "could not clean the tables"; return 1; }
 }
 identity() { # tenant (quoted uuid or NULL), e-mail, status
@@ -271,6 +271,28 @@ link_rows_are_valid_unique_and_follow_their_account() {
   [ "$(psql_admin -c "SELECT count(*) FROM security.email_verification")" = 0 ] || { echo "the links did not follow their account"; return 1; }
   [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = 'security' AND indexname IN ('idx_email_verification_token_hash', 'idx_email_verification_identity_created_at')")" = 2 ] || { echo "an index of the links is missing"; return 1; }
   [ "$(psql_admin -c "SELECT has_table_privilege('security_app', 'security.email_verification', 'INSERT,UPDATE,DELETE')")" = t ] || { echo "security_app cannot write the links"; return 1; }
+}
+# ---- the probes of the password recovery (spec 006-hu-sec-004, task REC-02): the code rows
+RECOVERY_HMAC=$(printf 'ab%.0s' $(seq 1 32))
+recovery_code_rows_are_valid_and_follow_their_account() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" ana@example.com ACTIVE)" >/dev/null || return 1
+  id=$(psql_admin -c "SELECT identity_id FROM security.identity LIMIT 1")
+  code() { printf "INSERT INTO security.recovery_code (identity_id, code_hmac, expires_at) VALUES ('%s', '%s', now() + interval '%s')" "$id" "$1" "${2:-30 minutes}"; }
+  psql_admin -c "$(code "$RECOVERY_HMAC")" >/dev/null || { echo "a valid code row was refused"; return 1; }
+  [ "$(psql_admin -c "SELECT wrong_tries = 0 AND used_at IS NULL AND retired_at IS NULL FROM security.recovery_code")" = t ] || { echo "a new code must start unused with no wrong tries"; return 1; }
+  refused chk_recovery_code_hmac "$(code not-an-hmac)" || return 1
+  refused chk_recovery_code_hmac "$(code "$(printf 'AB%.0s' $(seq 1 32))")" || return 1
+  refused chk_recovery_code_expiry "$(code "$(printf 'cd%.0s' $(seq 1 32))" '-1 hour')" || return 1
+  refused chk_recovery_code_wrong_tries "UPDATE security.recovery_code SET wrong_tries = 6" || return 1
+  refused chk_recovery_code_wrong_tries "UPDATE security.recovery_code SET wrong_tries = -1" || return 1
+  psql_admin -c "UPDATE security.recovery_code SET wrong_tries = 5, retired_at = now()" >/dev/null || { echo "five wrong tries were refused"; return 1; }
+  refused chk_recovery_code_send_error "UPDATE security.recovery_code SET send_failed_at = now(), send_error = repeat('e', 201)" || return 1
+  refused fk_recovery_code_identity "INSERT INTO security.recovery_code (identity_id, code_hmac, expires_at) VALUES ('00000000-0000-4000-8000-0000000000ff', '$(printf 'ef%.0s' $(seq 1 32))', now() + interval '30 minutes')" || return 1
+  psql_admin -c "DELETE FROM security.identity WHERE identity_id = '$id'" >/dev/null || { echo "the account could not be deleted with its codes"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM security.recovery_code")" = 0 ] || { echo "the codes did not follow their account"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = 'security' AND indexname = 'idx_recovery_code_identity_created_at'")" = 1 ] || { echo "the index of the codes of an account is missing"; return 1; }
+  [ "$(psql_admin -c "SELECT has_table_privilege('security_app', 'security.recovery_code', 'INSERT,UPDATE,DELETE')")" = t ] || { echo "security_app cannot write the codes"; return 1; }
 }
 the_tenant_copy_keeps_an_optional_commercial_name() {
   clean || return 1
@@ -436,6 +458,7 @@ check "I·the_idempotency_key_is_unique_per_scope_and_between_8_and_128_characte
 check "I·the_idempotency_key_follows_its_account_and_has_its_index" the_idempotency_key_follows_its_account_and_has_its_index
 check "I·a_pending_status_is_accepted_and_the_moment_of_verification_is_kept" a_pending_status_is_accepted_and_the_moment_of_verification_is_kept
 check "I·link_rows_are_valid_unique_and_follow_their_account" link_rows_are_valid_unique_and_follow_their_account
+check "I·recovery_code_rows_are_valid_and_follow_their_account" recovery_code_rows_are_valid_and_follow_their_account
 check "I·the_tenant_copy_keeps_an_optional_commercial_name" the_tenant_copy_keeps_an_optional_commercial_name
 check "I·the_account_keeps_who_when_and_why_of_a_change_and_of_a_temporary_credential" the_account_keeps_who_when_and_why_of_a_change_and_of_a_temporary_credential
 check "I·the_listing_of_users_has_its_index" the_listing_of_users_has_its_index
@@ -451,8 +474,8 @@ psql_admin -c "$(identity "'$T1'" ana@example.com PENDING)" \
            -c "INSERT INTO security.email_verification (identity_id, token_hash, expires_at) SELECT identity_id, '$LINK_HASH', now() + interval '1 day' FROM security.identity" \
            -c "UPDATE security.identity SET email_verified_at = now()" \
            -c "INSERT INTO security.tenant_copy (tenant_id, identifier, status, occurred_at, commercial_name) VALUES ('$T1', 'acme-tours', 'ACTIVE', now(), 'Acme Tours SAS')" \
-           -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity" \
-           -c "INSERT INTO security.membership_permission (membership_id, permission, granted_at, granted_by) SELECT membership_id, 'MANAGE_CASH', now(), 'tenant-administrator/x' FROM security.membership" \
+           -c "INSERT INTO security.recovery_code (identity_id, code_hmac, expires_at) SELECT identity_id, '$RECOVERY_HMAC', now() + interval '30 minutes' FROM security.identity" \n           -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity" \
+           -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity" \n           -c "INSERT INTO security.membership_permission (membership_id, permission, granted_at, granted_by) SELECT membership_id, 'MANAGE_CASH', now(), 'tenant-administrator/x' FROM security.membership" \
            -c "INSERT INTO security.tenant_optional_role (tenant_id, role, enabled, changed_at, changed_by) VALUES ('$T1', 'MANAGER', true, now(), 'tenant-administrator/x')" >/dev/null
 check "I·db_ci_rolls_back_to_empty" rolled_back_to_empty
 check "I·db_ci_rebuilds_after_the_rollback" lb update
