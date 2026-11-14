@@ -84,6 +84,10 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 	if s.userLister != nil {
 		mux.Handle("GET /api/v1/security/users", s.protect(s.requireTenantAdministrator(http.HandlerFunc(s.listInternalUsers))))
 	}
+	if s.supportRequests != nil {
+		mux.Handle("POST /api/v1/security/platform-support-accesses", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.askForSupportAccess))))
+		mux.Handle("GET /api/v1/security/platform-support-accesses", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.listPlatformSupportAccesses))))
+	}
 	if s.permissions != nil {
 		mux.Handle("POST /api/v1/security/users/{accountId}/permission-grant", s.protect(s.requireTenantAdministrator(s.changePermission(s.permissions.Grant))))
 		mux.Handle("POST /api/v1/security/users/{accountId}/permission-removal", s.protect(s.requireTenantAdministrator(s.changePermission(s.permissions.Remove))))
@@ -135,6 +139,7 @@ type server struct {
 	firstAdmins      AccountCreator
 	internalUsers    AccountCreator
 	userLister       UserLister
+	supportRequests  SupportRequester
 	permissions      PermissionChanger
 	optionalRoles    OptionalRoleManager
 	userStatus       UserStatusChanger
