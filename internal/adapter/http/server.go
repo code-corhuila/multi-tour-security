@@ -88,6 +88,10 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 		mux.Handle("POST /api/v1/security/platform-support-accesses", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.askForSupportAccess))))
 		mux.Handle("GET /api/v1/security/platform-support-accesses", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.listPlatformSupportAccesses))))
 	}
+	if s.supportSessions != nil {
+		mux.Handle("POST /api/v1/security/platform-support-accesses/{supportAccessId}/token", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.takeSupportAccessToken))))
+		mux.Handle("POST /api/v1/security/platform-support-accesses/{supportAccessId}/closure", s.protect(s.requirePlatformAdministratorOrItsAccess(http.HandlerFunc(s.closeSupportAccess))))
+	}
 	if s.supportDecisions != nil {
 		guard := func(next http.Handler) http.Handler { return s.protect(s.requireTenantAdministratorOrRestricted(next)) }
 		mux.Handle("GET /api/v1/security/support-accesses", guard(http.HandlerFunc(s.listSupportAccesses)))
@@ -147,6 +151,7 @@ type server struct {
 	userLister       UserLister
 	supportRequests  SupportRequester
 	supportDecisions SupportDecider
+	supportSessions  SupportSessionService
 	permissions      PermissionChanger
 	optionalRoles    OptionalRoleManager
 	userStatus       UserStatusChanger

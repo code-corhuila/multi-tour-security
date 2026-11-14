@@ -47,6 +47,8 @@ type eventBody struct {
 	EventVersion  int             `json:"eventVersion"`
 	TenantID      string          `json:"tenantId,omitempty"`
 	AggregateID   string          `json:"aggregateId"`
+	ActorID       string          `json:"actorId,omitempty"`
+	Reason        string          `json:"reason,omitempty"`
 	Payload       json.RawMessage `json:"payload"`
 	CorrelationID string          `json:"correlationId"`
 	OccurredAt    string          `json:"occurredAt"`
@@ -59,7 +61,7 @@ type eventBody struct {
 
 func eventOf(e outbox.Event) eventBody {
 	body := eventBody{
-		EventID: e.ID, EventType: e.Type, EventVersion: e.Version, TenantID: e.TenantID, AggregateID: e.AggregateID, Payload: e.Payload,
+		EventID: e.ID, EventType: e.Type, EventVersion: e.Version, TenantID: e.TenantID, AggregateID: e.AggregateID, ActorID: e.ActorID, Reason: e.Reason, Payload: e.Payload,
 		CorrelationID: e.CorrelationID, OccurredAt: e.OccurredAt.UTC().Format(time.RFC3339Nano), Status: string(e.Status),
 		Attempts: e.Attempts, LastError: e.LastError, NextAttemptAt: e.NextAttemptAt.UTC().Format(time.RFC3339Nano),
 	}
