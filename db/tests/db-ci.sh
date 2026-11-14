@@ -114,8 +114,8 @@ refused() { # fragment, statement
 }
 # every table with a foreign key to these must be in the list, or the TRUNCATE fails and the probes say so
 clean() {
-  # the key table (HU-SEC-002), the link table (HU-SEC-003) and the code table (HU-SEC-004) reference identity, so they join the TRUNCATE once they exist
-  extra=$(psql_admin -c "SELECT CASE WHEN to_regclass('security.idempotency_key') IS NULL THEN '' ELSE ', security.idempotency_key' END || CASE WHEN to_regclass('security.email_verification') IS NULL THEN '' ELSE ', security.email_verification' END || CASE WHEN to_regclass('security.recovery_code') IS NULL THEN '' ELSE ', security.recovery_code' END || CASE WHEN to_regclass('security.membership_permission') IS NULL THEN '' ELSE ', security.membership_permission' END || CASE WHEN to_regclass('security.tenant_optional_role') IS NULL THEN '' ELSE ', security.tenant_optional_role' END") || return 1
+  # the key table (HU-SEC-002), the link table (HU-SEC-003), the code table (HU-SEC-004) and the support access table (HU-SEC-007) reference identity, so they join the TRUNCATE once they exist
+  extra=$(psql_admin -c "SELECT CASE WHEN to_regclass('security.idempotency_key') IS NULL THEN '' ELSE ', security.idempotency_key' END || CASE WHEN to_regclass('security.email_verification') IS NULL THEN '' ELSE ', security.email_verification' END || CASE WHEN to_regclass('security.recovery_code') IS NULL THEN '' ELSE ', security.recovery_code' END || CASE WHEN to_regclass('security.membership_permission') IS NULL THEN '' ELSE ', security.membership_permission' END || CASE WHEN to_regclass('security.tenant_optional_role') IS NULL THEN '' ELSE ', security.tenant_optional_role' END || CASE WHEN to_regclass('security.support_access') IS NULL THEN '' ELSE ', security.support_access' END") || return 1
   psql_admin -c "TRUNCATE security.refresh_token, security.session, security.membership_role, security.membership, security.identity, security.tenant_copy$extra" >/dev/null || { echo "could not clean the tables"; return 1; }
 }
 identity() { # tenant (quoted uuid or NULL), e-mail, status

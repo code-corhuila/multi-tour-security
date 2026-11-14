@@ -104,3 +104,20 @@ databaseChangeLog:
             relativeToChangelogFile: true
             splitStatements: false
             stripComments: false
+  - changeSet:
+      id: security-ddl-tables-007
+      author: Molina211
+      labels: "HU-SEC-007,ddl,tables"
+      comment: "The support access of the Platform Administrator (HU-SEC-007 part A, plan D-01)."
+      changes:
+        - sqlFile:
+            path: 007_create_support_access.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sqlFile:
+            path: ../../05_rollbacks/01_ddl/03_tables/007_create_support_access.rollback.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
