@@ -185,3 +185,62 @@ func TestC_ASignerWithoutAKeyRefusesToSign(t *testing.T) {
 		t.Fatal("a signer with no key signed")
 	}
 }
+
+func TestC_TheTokenOfASupportAccessCarriesItsScopeAndItsAuthorizationAndIsReadBack(t *testing.T) {
+	k := key(t)
+	c, err := token.Exceptional("11111111-1111-4111-8111-111111111111", "tenant-1", []string{"CASH", "RESERVATIONS"}, "22222222-2222-4222-8222-222222222222", now.Add(4*time.Hour), now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := mustSign(t, k, c)
+	body := mustParse(t, raw, k)
+	if body["access"] != "exceptional" || body["tenantId"] != "tenant-1" || body["authorizationId"] != "22222222-2222-4222-8222-222222222222" {
+		t.Fatalf("claims = %v", body)
+	}
+	if scope, _ := body["scope"].([]any); len(scope) != 2 || scope[0] != "CASH" || scope[1] != "RESERVATIONS" {
+		t.Fatalf("scope = %v", body["scope"])
+	}
+	got, err := httpadapter.NewVerifier(&k.PublicKey).Verify(raw)
+	if err != nil || got.AuthorizationID != "22222222-2222-4222-8222-222222222222" || got.Access != "exceptional" || got.TenantID != "tenant-1" {
+		t.Fatalf("read back: %+v %v", got, err)
+	}
+}
+
+func TestC_AnOrdinaryTokenCarriesNeitherScopeNorAuthorization(t *testing.T) {
+	k := key(t)
+	body := mustParse(t, mustSign(t, k, claims()), k)
+	for _, name := range []string{"scope", "authorizationId"} {
+		if _, present := body[name]; present {
+			t.Errorf("an ordinary token carries %s", name)
+		}
+	}
+}
+
+func TestC_OnlyTheTokenOfASupportAccessMayCarryAScopeOrAnAuthorization(t *testing.T) {
+	k := key(t)
+	for name, edit := range map[string]func(*token.Claims){
+		"a scope on an ordinary token":          func(c *token.Claims) { c.Scope = []string{"CASH"} },
+		"an authorization on an ordinary token": func(c *token.Claims) { c.AuthorizationID = "22222222-2222-4222-8222-222222222222" },
+	} {
+		c := claims()
+		edit(&c)
+		if _, err := jwtadapter.NewSigner(k).Sign(c); err == nil {
+			t.Errorf("%s was signed", name)
+		}
+	}
+	exceptional, _ := token.Exceptional("11111111-1111-4111-8111-111111111111", "tenant-1", []string{"CASH"}, "22222222-2222-4222-8222-222222222222", now.Add(time.Hour), now)
+	for name, edit := range map[string]func(*token.Claims){
+		"an access with no scope":         func(c *token.Claims) { c.Scope = nil },
+		"an access with no authorization": func(c *token.Claims) { c.AuthorizationID = "" },
+		"an access with no tenant":        func(c *token.Claims) { c.TenantID = "" },
+	} {
+		c := exceptional
+		edit(&c)
+		if _, err := jwtadapter.NewSigner(k).Sign(c); err == nil {
+			t.Errorf("%s was signed", name)
+		}
+	}
+	if _, err := jwtadapter.NewSigner(k).Sign(exceptional); err != nil {
+		t.Errorf("the token of an access: %v", err)
+	}
+}
