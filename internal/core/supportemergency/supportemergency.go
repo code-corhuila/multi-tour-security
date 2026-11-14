@@ -13,9 +13,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/validate"
 )
 
-// ErrInvalid and FieldError are those every use case shares.
-var ErrInvalid = validate.ErrInvalid
-
+// FieldError is the one every use case shares.
 type FieldError = validate.FieldError
 
 // ErrTenantNotFound is a tenant that does not exist or is neither active nor inactive: from here it is the same answer.
