@@ -35,6 +35,11 @@ func (s *Signer) Sign(c token.Claims) (string, error) {
 	if c.Subject == "" || c.Issuer == "" || !c.ExpiresAt.After(c.IssuedAt) {
 		return "", errors.New("the claims are not those of a token: they need a subject, an issuer and a life")
 	}
+	// the scope and the authorization belong to the token of a support access, and that token needs both and a tenant (ADR-004 D5)
+	exceptional := c.Access == token.ExceptionalAccess
+	if exceptional != (len(c.Scope) > 0) || exceptional != (c.AuthorizationID != "") || (exceptional && c.TenantID == "") {
+		return "", errors.New("the scope and the authorization belong to the token of a support access, which needs both and a tenant")
+	}
 	body := jwt.MapClaims{
 		"iss":         c.Issuer,
 		"aud":         jwt.ClaimStrings{c.Audience},
@@ -50,6 +55,12 @@ func (s *Signer) Sign(c token.Claims) (string, error) {
 	}
 	if c.Access != "" {
 		body["access"] = c.Access
+	}
+	if len(c.Scope) > 0 {
+		body["scope"] = c.Scope
+	}
+	if c.AuthorizationID != "" {
+		body["authorizationId"] = c.AuthorizationID
 	}
 	return jwt.NewWithClaims(jwt.SigningMethodRS256, body).SignedString(s.key)
 }

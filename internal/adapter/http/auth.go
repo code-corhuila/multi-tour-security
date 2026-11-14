@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+
+	coretoken "github.com/code-corhuila/multi-tour-security/internal/core/token"
 )
 
 // tokenLeeway is the clock tolerance of ADR-004 D10.
@@ -33,6 +35,8 @@ type Claims struct {
 	// only ("password-change", "restricted") and empty for an ordinary one.
 	TenantID string
 	Access   string
+	// AuthorizationID is the id of the support access the token was issued for; empty in any other token.
+	AuthorizationID string
 	// Roles are the roles of the token that are text; nil when the claim is absent.
 	Roles []string
 }
@@ -73,6 +77,14 @@ func (v *Verifier) Verify(raw string) (Claims, error) {
 		return Claims{}, errMalformedClaim
 	}
 	if claims.Access, ok = textClaim(body, "access"); !ok {
+		return Claims{}, errMalformedClaim
+	}
+	if claims.AuthorizationID, ok = textClaim(body, "authorizationId"); !ok {
+		return Claims{}, errMalformedClaim
+	}
+	// the token of a support access has a tenant and the id of its authorization; no other token has one (ADR-004 D5)
+	exceptional := claims.Access == coretoken.ExceptionalAccess
+	if exceptional != (claims.AuthorizationID != "") || (exceptional && (claims.TenantID == "" || !uuidPattern.MatchString(claims.AuthorizationID))) {
 		return Claims{}, errMalformedClaim
 	}
 	if raw, present := body["roles"]; present && raw != nil {

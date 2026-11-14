@@ -88,6 +88,12 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 		mux.Handle("POST /api/v1/security/platform-support-accesses", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.askForSupportAccess))))
 		mux.Handle("GET /api/v1/security/platform-support-accesses", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.listPlatformSupportAccesses))))
 	}
+	if s.supportDecisions != nil {
+		guard := func(next http.Handler) http.Handler { return s.protect(s.requireTenantAdministratorOrRestricted(next)) }
+		mux.Handle("GET /api/v1/security/support-accesses", guard(http.HandlerFunc(s.listSupportAccesses)))
+		mux.Handle("POST /api/v1/security/support-accesses/{supportAccessId}/approval", guard(s.decideSupportAccess(s.supportDecisions.Approve, false, "approving a support access")))
+		mux.Handle("POST /api/v1/security/support-accesses/{supportAccessId}/rejection", guard(s.decideSupportAccess(s.supportDecisions.Reject, true, "rejecting a support access")))
+	}
 	if s.permissions != nil {
 		mux.Handle("POST /api/v1/security/users/{accountId}/permission-grant", s.protect(s.requireTenantAdministrator(s.changePermission(s.permissions.Grant))))
 		mux.Handle("POST /api/v1/security/users/{accountId}/permission-removal", s.protect(s.requireTenantAdministrator(s.changePermission(s.permissions.Remove))))
@@ -140,6 +146,7 @@ type server struct {
 	internalUsers    AccountCreator
 	userLister       UserLister
 	supportRequests  SupportRequester
+	supportDecisions SupportDecider
 	permissions      PermissionChanger
 	optionalRoles    OptionalRoleManager
 	userStatus       UserStatusChanger

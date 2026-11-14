@@ -77,6 +77,10 @@ func tokenWith(t *testing.T, roles []string, tenantID, access string) string {
 	if access != "" {
 		claims["access"] = access
 	}
+	if access == "exceptional" {
+		// the token of a support access has the id of its authorization, or the verifier refuses it
+		claims["authorizationId"] = "22222222-2222-4222-8222-222222222222"
+	}
 	return sign(t, jwt.SigningMethodRS256, routeKey, claims)
 }
 

@@ -4,6 +4,7 @@ package token
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -18,6 +19,8 @@ const (
 
 	AccessLife         = 15 * time.Minute
 	PasswordChangeLife = 10 * time.Minute
+	// MaxExceptionalLife is the longest a support access lasts (PDR section 9).
+	MaxExceptionalLife = 24 * time.Hour
 	MinServiceLife     = time.Minute
 	MaxServiceLife     = 30 * 24 * time.Hour
 
@@ -25,6 +28,8 @@ const (
 	// temporary credential, which only serves the route that chooses a password.
 	RestrictedAccess     = "restricted"
 	PasswordChangeAccess = "password-change"
+	// ExceptionalAccess marks the token of a support access of the Platform Administrator to one tenant (ADR-004 D5).
+	ExceptionalAccess = "exceptional"
 )
 
 // ErrServiceName is a name that the services would refuse as a subject.
@@ -33,18 +38,27 @@ var ErrServiceName = errors.New("a service name is 1 to 100 characters with no s
 // ErrServiceLife is a service token asked for a life under a minute or over 30 days.
 var ErrServiceLife = errors.New("a service token lasts from one minute to 30 days")
 
-// Claims are the claims of an access token. TenantID is empty for the platform and for a service.
+// ErrExceptionalLife is the token of a support access that would end before it starts or after 24 hours.
+var ErrExceptionalLife = errors.New("a support access token ends after it starts and within 24 hours")
+
+// ErrExceptionalClaims is the token of a support access with no person, tenant, area or authorization.
+var ErrExceptionalClaims = errors.New("a support access token needs a person, a tenant, an area and its authorization")
+
+// Claims are the claims of an access token. TenantID is empty for the platform and for a service. Scope and AuthorizationID are the claims of
+// the token of a support access (ADR-004 D5) and are empty in any other.
 type Claims struct {
-	Issuer      string
-	Audience    string
-	Subject     string
-	TenantID    string
-	Roles       []string
-	Permissions []string
-	Access      string
-	IssuedAt    time.Time
-	NotBefore   time.Time
-	ExpiresAt   time.Time
+	Issuer          string
+	Audience        string
+	Subject         string
+	TenantID        string
+	Roles           []string
+	Permissions     []string
+	Access          string
+	Scope           []string
+	AuthorizationID string
+	IssuedAt        time.Time
+	NotBefore       time.Time
+	ExpiresAt       time.Time
 }
 
 func claims(subject, tenantID string, roles, permissions []string, access string, now time.Time, life time.Duration) Claims {
@@ -84,4 +98,28 @@ func Service(name string, life time.Duration, now time.Time) (Claims, error) {
 		return Claims{}, ErrServiceLife
 	}
 	return claims(name, "", []string{"SERVICE"}, nil, "", now, life), nil
+}
+
+// Exceptional is the token of a support access: the Platform Administrator for one tenant, the approved areas as the scope, the id of the
+// authorization and an end equal to the end of the access, never later than 24 hours from now. It has no special permission and no renewal.
+func Exceptional(platformAdministratorID, tenantID string, scope []string, authorizationID string, ends, now time.Time) (Claims, error) {
+	if !plainText(platformAdministratorID) || !plainText(tenantID) || !plainText(authorizationID) || len(scope) == 0 {
+		return Claims{}, ErrExceptionalClaims
+	}
+	for i, area := range scope {
+		if !plainText(area) || slices.Contains(scope[:i], area) {
+			return Claims{}, ErrExceptionalClaims
+		}
+	}
+	if !ends.After(now) || ends.After(now.Add(MaxExceptionalLife)) {
+		return Claims{}, ErrExceptionalLife
+	}
+	c := claims(platformAdministratorID, tenantID, []string{"PLATFORM_ADMINISTRATOR"}, nil, ExceptionalAccess, now, ends.Sub(now))
+	c.Scope, c.AuthorizationID = append([]string{}, scope...), authorizationID
+	return c, nil
+}
+
+// plainText is a value with something in it, no space at its ends and no control character: what the services read as a name or an id.
+func plainText(s string) bool {
+	return s != "" && s == strings.TrimSpace(s) && strings.IndexFunc(s, unicode.IsControl) < 0
 }
