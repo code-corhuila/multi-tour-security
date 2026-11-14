@@ -64,6 +64,10 @@ type supportAccessBody struct {
 	OpenedAt        string   `json:"openedAt,omitempty"`
 	ClosedAt        string   `json:"closedAt,omitempty"`
 	ClosedReason    string   `json:"closedReason,omitempty"`
+	Basis           string   `json:"basis"`
+	Statement       string   `json:"statement,omitempty"`
+	Sensitive       bool     `json:"sensitive"`
+	SensitiveReason string   `json:"sensitiveReason,omitempty"`
 }
 
 func toSupportAccessBody(a supportaccess.Access) supportAccessBody {
@@ -71,8 +75,16 @@ func toSupportAccessBody(a supportaccess.Access) supportAccessBody {
 		SupportAccessID: a.ID, TenantID: a.TenantID, Status: string(a.Status), Reason: a.Reason, Areas: a.AreaNames(), Hours: a.Hours,
 		RequestedBy: a.RequestedBy, RequestedAt: instant(a.RequestedAt), DecidedBy: a.DecidedBy, DecidedAt: instant(a.DecidedAt),
 		DecisionReason: a.DecisionReason, ExpiresAt: instant(a.ExpiresAt), OpenedAt: instant(a.OpenedAt), ClosedAt: instant(a.ClosedAt),
-		ClosedReason: a.ClosedReason,
+		ClosedReason: a.ClosedReason, Basis: basisOf(a), Statement: a.Statement, Sensitive: a.Sensitive, SensitiveReason: a.SensitiveReason,
 	}
+}
+
+// basisOf names the basis of an access; one built before the basis existed was authorized by the tenant.
+func basisOf(a supportaccess.Access) string {
+	if a.IsEmergency() {
+		return string(supportaccess.Emergency)
+	}
+	return string(supportaccess.TenantAuthorization)
 }
 
 // instant is the RFC 3339 form in UTC of an instant, or nothing for the zero one.

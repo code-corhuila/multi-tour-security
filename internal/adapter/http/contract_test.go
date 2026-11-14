@@ -28,6 +28,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/signin"
 	"github.com/code-corhuila/multi-tour-security/internal/core/supportaccess"
 	"github.com/code-corhuila/multi-tour-security/internal/core/supportdecision"
+	"github.com/code-corhuila/multi-tour-security/internal/core/supportemergency"
 	"github.com/code-corhuila/multi-tour-security/internal/core/supportrequest"
 	"github.com/code-corhuila/multi-tour-security/internal/core/supportsession"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenantevent"
@@ -123,7 +124,7 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 			req.Header.Set("Content-Type", contentType)
 		}
 		req.Header.Set("X-Correlation-Id", "gate-1")
-		if strings.HasSuffix(path, "/events") || strings.HasSuffix(path, "/accounts") || strings.HasSuffix(path, "/administrators") || strings.HasSuffix(path, "/users") || strings.HasSuffix(path, "/platform-support-accesses") {
+		if strings.HasSuffix(path, "/events") || strings.HasSuffix(path, "/accounts") || strings.HasSuffix(path, "/administrators") || strings.HasSuffix(path, "/users") || strings.HasSuffix(path, "/platform-support-accesses") || strings.HasSuffix(path, "/platform-emergency-accesses") {
 			req.Header.Set("Idempotency-Key", eventKey)
 		}
 		rec := httptest.NewRecorder()
@@ -499,6 +500,27 @@ func TestC_EveryResponseOfEveryContractOperationIsProducedAndValid(t *testing.T)
 		{http.MethodGet, "", "", "", platformAdmin, &fakeSupport{err: errors.New("boom")}, http.StatusInternalServerError},
 	} {
 		run(supportHandler(c.svc, io.Discard), c.method, supportRoute+c.query, c.contentType, c.body, c.token, c.want)
+	}
+
+	// the Platform Administrator opens an emergency access (HU-SEC-007 part B)
+	bigEmergency := `{"tenantId":"3f2b8c1e-5d4a-4f6b-9c7d-1a2b3c4d5e6f","reason":"` + strings.Repeat("r", 4200) + `","statement":"s","areas":["CASH"],"hours":1}`
+	for _, c := range []struct {
+		contentType, body, token string
+		svc                      *fakeEmergency
+		want                     int
+	}{
+		{"application/json", emergencyBody, platformAdmin, &fakeEmergency{access: openedEmergency(false), created: true}, http.StatusCreated},
+		{"application/json", emergencyBody, platformAdmin, &fakeEmergency{access: openedEmergency(false)}, http.StatusOK},
+		{"application/json", emergencyBody, platformAdmin, &fakeEmergency{err: &supportemergency.FieldError{Field: "statement"}}, http.StatusBadRequest},
+		{"application/json", emergencyBody, "", &fakeEmergency{}, http.StatusUnauthorized},
+		{"application/json", emergencyBody, tenantAdmin, &fakeEmergency{}, http.StatusForbidden},
+		{"application/json", emergencyBody, platformAdmin, &fakeEmergency{err: supportemergency.ErrTenantNotFound}, http.StatusNotFound},
+		{"application/json", bigEmergency, platformAdmin, &fakeEmergency{}, http.StatusRequestEntityTooLarge},
+		{"text/plain", emergencyBody, platformAdmin, &fakeEmergency{}, http.StatusUnsupportedMediaType},
+		{"application/json", emergencyBody, platformAdmin, &fakeEmergency{err: supportaccess.ErrOpenAccessExists}, http.StatusUnprocessableEntity},
+		{"application/json", emergencyBody, platformAdmin, &fakeEmergency{err: errors.New("boom")}, http.StatusInternalServerError},
+	} {
+		run(emergencyHandler(c.svc, io.Discard), http.MethodPost, emergencyRoute, c.contentType, c.body, c.token, c.want)
 	}
 
 	// the Tenant Administrator lists and decides the support requests of the tenant (HU-SEC-007 part A)

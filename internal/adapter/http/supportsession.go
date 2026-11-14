@@ -25,14 +25,14 @@ func WithSupportSessions(service SupportSessionService) Option {
 }
 
 // requirePlatformAdministratorOrItsAccess lets in what requirePlatformAdministrator lets in and also the token of the very access that is being
-// closed: it carries the role, a tenant, the mark `exceptional` and the id of its authorization, and that id must be the one of the path, so
+// closed: it carries the role, a tenant, the mark `exceptional` or `emergency` and the id of its authorization, and that id must be the one of the path, so
 // a token ends its own access and no other (the contract of closeSupportAccess).
 func (s *server) requirePlatformAdministratorOrItsAccess(next http.Handler) http.Handler {
 	ordinary := s.requirePlatformAdministrator(next)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		claims, _ := r.Context().Value(claimsKey{}).(Claims)
 		if slices.Contains(claims.Roles, account.RolePlatformAdministrator) && claims.TenantID != "" &&
-			claims.Access == token.ExceptionalAccess && claims.AuthorizationID == r.PathValue("supportAccessId") {
+			token.IsSupportAccess(claims.Access) && claims.AuthorizationID == r.PathValue("supportAccessId") {
 			next.ServeHTTP(w, r)
 			return
 		}

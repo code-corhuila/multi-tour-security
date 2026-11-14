@@ -22,22 +22,24 @@ func NewSupportAccesses(pool *pgxpool.Pool) *SupportAccesses { return &SupportAc
 
 // the columns of a request, in the order scanAccess reads them
 const supportColumns = `support_access_id::text, tenant_id::text, requested_by::text, reason, areas, hours, status, requested_at,
-	COALESCE(decided_by::text, ''), decided_at, COALESCE(decision_reason, ''), expires_at, opened_at, closed_at, COALESCE(closed_reason, '')`
+	COALESCE(decided_by::text, ''), decided_at, COALESCE(decision_reason, ''), expires_at, opened_at, closed_at, COALESCE(closed_reason, ''),
+	basis, COALESCE(statement, ''), sensitive, COALESCE(sensitive_reason, '')`
 
 func scanAccess(row pgx.Row) (supportaccess.Access, error) {
 	var a supportaccess.Access
 	var areas []string
-	var status string
+	var status, basis string
 	var decidedAt, expiresAt, openedAt, closedAt *time.Time
 	err := row.Scan(&a.ID, &a.TenantID, &a.RequestedBy, &a.Reason, &areas, &a.Hours, &status, &a.RequestedAt,
-		&a.DecidedBy, &decidedAt, &a.DecisionReason, &expiresAt, &openedAt, &closedAt, &a.ClosedReason)
+		&a.DecidedBy, &decidedAt, &a.DecisionReason, &expiresAt, &openedAt, &closedAt, &a.ClosedReason,
+		&basis, &a.Statement, &a.Sensitive, &a.SensitiveReason)
 	if err != nil {
 		return supportaccess.Access{}, err
 	}
 	if a.Areas, err = supportaccess.ParseAreas(areas); err != nil {
 		return supportaccess.Access{}, err
 	}
-	a.Status = supportaccess.Status(status)
+	a.Status, a.Basis = supportaccess.Status(status), supportaccess.Basis(basis)
 	a.RequestedAt = a.RequestedAt.UTC()
 	a.DecidedAt, a.ExpiresAt, a.OpenedAt, a.ClosedAt = utc(decidedAt), utc(expiresAt), utc(openedAt), utc(closedAt)
 	return a, nil
