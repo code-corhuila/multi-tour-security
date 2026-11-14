@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/code-corhuila/multi-tour-security/internal/core/account"
 	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
 )
 
@@ -26,7 +27,7 @@ func WithOutbox(service OutboxService) Option {
 	return func(s *server) { s.outbox = service }
 }
 
-const serviceRole = "SERVICE"
+const serviceRole = account.RoleService
 
 // requireService lets in the token of a service and nothing else: the role SERVICE alone, no tenant and no access mark.
 // Any other valid token, a person's included, is FORBIDDEN, and the gateway does not route these paths at all.

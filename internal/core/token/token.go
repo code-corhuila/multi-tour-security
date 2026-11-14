@@ -105,7 +105,7 @@ func Service(name string, life time.Duration, now time.Time) (Claims, error) {
 	if life < MinServiceLife || life > MaxServiceLife {
 		return Claims{}, ErrServiceLife
 	}
-	return claims(name, "", []string{"SERVICE"}, nil, "", now, life), nil
+	return claims(name, "", []string{account.RoleService}, nil, "", now, life), nil
 }
 
 // Exceptional is the token of a support access: the Platform Administrator for one tenant, the approved areas as the scope, the id of the
@@ -132,7 +132,7 @@ func supportToken(access, platformAdministratorID, tenantID string, scope []stri
 	if !ends.After(now) || ends.After(now.Add(MaxExceptionalLife)) {
 		return Claims{}, ErrExceptionalLife
 	}
-	c := claims(platformAdministratorID, tenantID, []string{"PLATFORM_ADMINISTRATOR"}, nil, access, now, ends.Sub(now))
+	c := claims(platformAdministratorID, tenantID, []string{account.RolePlatformAdministrator}, nil, access, now, ends.Sub(now))
 	c.Scope, c.AuthorizationID = append([]string{}, scope...), authorizationID
 	return c, nil
 }

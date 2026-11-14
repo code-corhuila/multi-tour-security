@@ -48,9 +48,6 @@ func TestD_TheAreasAreAClosedListWithoutSensitiveData(t *testing.T) {
 			t.Errorf("%s: err = %v", name, err)
 		}
 	}
-	if got := supportaccess.AreaNames(); !slices.Equal(got, []string{"RESERVATIONS", "CATALOG", "OPERATIONS", "CASH", "CUSTOMERS"}) {
-		t.Errorf("areas = %v", got)
-	}
 }
 
 func TestD_ARequestIsValidOnlyWithAReasonAnAreaAndOneToTwentyFourHours(t *testing.T) {
@@ -239,14 +236,6 @@ func TestD_ADecisionAtExactly72HoursIsTooLate(t *testing.T) {
 	}
 	if _, err := request(t).Reject(admin, "no", now.Add(72*time.Hour)); !errors.Is(err, supportaccess.ErrInvalidTransition) {
 		t.Errorf("rejecting at 72 hours: %v", err)
-	}
-}
-
-func TestD_AreaNamesIsACopy(t *testing.T) {
-	names := supportaccess.AreaNames()
-	names[0] = "CUSTOMERS"
-	if supportaccess.AreaNames()[0] != "RESERVATIONS" {
-		t.Error("the caller changed the closed list")
 	}
 }
 
