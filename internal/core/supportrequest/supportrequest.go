@@ -133,6 +133,9 @@ func (s *Service) List(ctx context.Context, q Query) (Page, error) {
 		return Page{}, &FieldError{Field: pageField}
 	}
 	now := s.Clock()
+	if err := s.Store.ExpireApproved(ctx, q.ActorID, "", now); err != nil {
+		return Page{}, err
+	}
 	if err := s.Store.ExpirePending(ctx, q.ActorID, now); err != nil {
 		return Page{}, err
 	}

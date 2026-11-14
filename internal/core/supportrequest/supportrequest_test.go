@@ -38,17 +38,18 @@ func (f *fakeTenants) FindByID(_ context.Context, id string) (tenant.Copy, bool,
 }
 
 type fakeStore struct {
-	created   []supportaccess.Access
-	keys      map[string]supportaccess.Access
-	list      []supportaccess.Access
-	err       error
-	listed    []string // the requester of each listing
-	statuses  []string
-	expired   []string // the requester of each expiry
-	expireErr error
-	lookups   int // the times a key was looked up
-	listLimit int
-	listSkip  int
+	created            []supportaccess.Access
+	keys               map[string]supportaccess.Access
+	list               []supportaccess.Access
+	err                error
+	listed             []string // the requester of each listing
+	statuses           []string
+	expired            []string // the requester of each expiry
+	expireErr          error
+	approvedExpiredFor []string // the author of each expiry of approved accesses
+	lookups            int      // the times a key was looked up
+	listLimit          int
+	listSkip           int
 }
 
 func (f *fakeStore) Create(_ context.Context, a supportaccess.Access, key string) (supportaccess.Access, bool, error) {
@@ -89,6 +90,11 @@ func (f *fakeStore) ExpirePendingOfTenant(context.Context, string, time.Time) er
 }
 func (f *fakeStore) Decide(context.Context, supportaccess.Access) (bool, error) {
 	return false, errors.New("not used by asking")
+}
+
+func (f *fakeStore) ExpireApproved(_ context.Context, requestedBy, _ string, _ time.Time) error {
+	f.approvedExpiredFor = append(f.approvedExpiredFor, requestedBy)
+	return f.expireErr
 }
 
 func (f *fakeStore) ExpirePending(_ context.Context, requestedBy string, _ time.Time) error {
@@ -248,7 +254,7 @@ func TestA_TheListIsOfTheCallerOnlyAndShowsWhatRanOutAsExpired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(w.store.listed) != 1 || w.store.listed[0] != platform || len(w.store.expired) != 1 || w.store.expired[0] != platform {
+	if len(w.store.listed) != 1 || w.store.listed[0] != platform || len(w.store.expired) != 1 || w.store.expired[0] != platform || len(w.store.approvedExpiredFor) != 1 || w.store.approvedExpiredFor[0] != platform {
 		t.Fatalf("listed=%v expired=%v", w.store.listed, w.store.expired)
 	}
 	if len(page.Data) != 1 || page.Data[0].Status != supportaccess.Expired || page.Total != 1 || page.TotalPages != 1 {
