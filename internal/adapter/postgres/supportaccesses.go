@@ -123,3 +123,75 @@ func (s *SupportAccesses) ExpirePending(ctx context.Context, requestedBy string,
 		now, supportaccess.DecisionWindow.Seconds(), requestedBy)
 	return err
 }
+
+// FindForTenant returns the request with that id when it concerns that tenant.
+func (s *SupportAccesses) FindForTenant(ctx context.Context, tenantID, id string) (supportaccess.Access, bool, error) {
+	a, err := scanAccess(s.pool.QueryRow(ctx, `SELECT `+supportColumns+` FROM security.support_access WHERE support_access_id = $1::uuid AND tenant_id = $2::uuid`, id, tenantID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return supportaccess.Access{}, false, nil
+	}
+	return a, err == nil, err
+}
+
+// ListByTenant is one query: the page and, in each row, the total of the filter. Only the rows of that tenant are read.
+func (s *SupportAccesses) ListByTenant(ctx context.Context, tenantID, status string, limit, offset int) ([]supportaccess.Access, int, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+supportColumns+`, count(*) OVER () FROM security.support_access
+		WHERE tenant_id = $1::uuid AND ($2 = '' OR status = $2) ORDER BY requested_at DESC, support_access_id DESC LIMIT $3 OFFSET $4`,
+		tenantID, status, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	list, total := []supportaccess.Access{}, 0
+	for rows.Next() {
+		var count int
+		a, err := scanAccess(withCount{rows, &count})
+		if err != nil {
+			return nil, 0, err
+		}
+		list, total = append(list, a), count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if len(list) == 0 && offset > 0 {
+		if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM security.support_access WHERE tenant_id = $1::uuid AND ($2 = '' OR status = $2)`, tenantID, status).Scan(&total); err != nil {
+			return nil, 0, err
+		}
+	}
+	return list, total, nil
+}
+
+// withCount reads the columns of a request and then the trailing count of the window, so one scanner serves the two listings.
+type withCount struct {
+	rows  pgx.Rows
+	count *int
+}
+
+func (w withCount) Scan(dest ...any) error { return w.rows.Scan(append(dest, w.count)...) }
+
+// ExpirePendingOfTenant marks the requests of that tenant that nobody decided within the window as expired.
+func (s *SupportAccesses) ExpirePendingOfTenant(ctx context.Context, tenantID string, now time.Time) error {
+	_, err := s.pool.Exec(ctx, `UPDATE security.support_access SET status = 'EXPIRED' WHERE tenant_id = $3::uuid AND status = 'PENDING'
+		AND requested_at + make_interval(secs => $2::double precision) <= $1::timestamptz`,
+		now, supportaccess.DecisionWindow.Seconds(), tenantID)
+	return err
+}
+
+// Decide stores the decision only while the request is pending and within its window, in one statement, so two decisions at once have one winner
+// (the second waits for the row, finds it decided and writes nothing).
+func (s *SupportAccesses) Decide(ctx context.Context, a supportaccess.Access) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE security.support_access SET status = $3, decided_by = $4::uuid, decided_at = $5::timestamptz,
+			decision_reason = NULLIF($6, ''), expires_at = $7::timestamptz
+		WHERE support_access_id = $1::uuid AND tenant_id = $2::uuid AND status = 'PENDING'
+		  AND requested_at + make_interval(secs => $8::double precision) > $5::timestamptz`,
+		a.ID, a.TenantID, string(a.Status), a.DecidedBy, a.DecidedAt, a.DecisionReason, zeroToNil(a.ExpiresAt), supportaccess.DecisionWindow.Seconds())
+	return tag.RowsAffected() == 1, err
+}
+
+func zeroToNil(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}

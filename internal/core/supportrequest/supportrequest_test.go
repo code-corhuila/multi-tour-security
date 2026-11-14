@@ -78,6 +78,19 @@ func (f *fakeStore) FindByKey(_ context.Context, requestedBy, key string) (suppo
 	return a, ok, f.err
 }
 
+func (f *fakeStore) FindForTenant(context.Context, string, string) (supportaccess.Access, bool, error) {
+	return supportaccess.Access{}, false, errors.New("not used by asking")
+}
+func (f *fakeStore) ListByTenant(context.Context, string, string, int, int) ([]supportaccess.Access, int, error) {
+	return nil, 0, errors.New("not used by asking")
+}
+func (f *fakeStore) ExpirePendingOfTenant(context.Context, string, time.Time) error {
+	return errors.New("not used by asking")
+}
+func (f *fakeStore) Decide(context.Context, supportaccess.Access) (bool, error) {
+	return false, errors.New("not used by asking")
+}
+
 func (f *fakeStore) ExpirePending(_ context.Context, requestedBy string, _ time.Time) error {
 	f.expired = append(f.expired, requestedBy)
 	return f.expireErr
