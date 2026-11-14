@@ -135,6 +135,7 @@ func TestI_ClosingEndsTheAccessCutsTheSessionsAndWritesTheFactsTogether(t *testi
 	if len(revoked) != 1 || revoked[0]["aggregateId"] != root {
 		t.Fatalf("sessions revoked = %v", revoked)
 	}
+	requireRevocationsCarryTheTenant(t, pool)
 	var cutoff time.Time
 	if err := pool.QueryRow(ctx, `SELECT sessions_revoked_from FROM security.identity WHERE identity_id = $1::uuid`, root).Scan(&cutoff); err != nil || !cutoff.Equal(base.Add(3*time.Hour)) {
 		t.Fatalf("cutoff = %v %v", cutoff, err)

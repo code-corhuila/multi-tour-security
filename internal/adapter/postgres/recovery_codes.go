@@ -141,8 +141,8 @@ WITH used AS (
 ), revoked AS (
     INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, reason, payload, correlation_id, occurred_at)
     SELECT tenant_id, 'AccountSessionsRevoked', identity_id, 'PASSWORD_RESET',
-           jsonb_build_object('accountId', identity_id, 'revokedFrom', to_char(sessions_revoked_from AT TIME ZONE 'UTC', ` + utcTime + `),
-               'reason', 'PASSWORD_RESET'), $5, $4::timestamptz
+           jsonb_strip_nulls(jsonb_build_object('accountId', identity_id, 'tenantId', tenant_id, 'revokedFrom', to_char(sessions_revoked_from AT TIME ZONE 'UTC', ` + utcTime + `),
+               'reason', 'PASSWORD_RESET')), $5, $4::timestamptz
     FROM changed RETURNING 1
 ), reset AS (
     INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, payload, correlation_id, occurred_at)

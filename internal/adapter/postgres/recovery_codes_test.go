@@ -410,6 +410,7 @@ func TestI_AResetChangesThePasswordCutsTheSessionsLiftsTheBlockAndWritesTheFacts
 	if got["AccountSessionsRevoked"] != 1 || got["PasswordReset"] != 1 || got["AccountEmailVerified"] != 0 || got["PasswordRecoveryRequested"] != 1 {
 		t.Fatalf("events = %v", got)
 	}
+	requireRevocationsCarryTheTenant(t, w.pool)
 	var reason, accountID, roles string
 	if err := w.pool.QueryRow(ctx, `SELECT payload->>'reason', payload->>'accountId' FROM security.outbox_event WHERE event_type = 'AccountSessionsRevoked'`).Scan(&reason, &accountID); err != nil ||
 		reason != "PASSWORD_RESET" || accountID != w.ana {
