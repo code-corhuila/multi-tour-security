@@ -36,7 +36,7 @@ func execute(ctx context.Context, args []string, getenv func(string) string, std
 	}
 }
 
-// defaultServiceTokenLife is what a token lasts when no duration is asked for; the limits, from one minute to 30 days,
+// defaultServiceTokenLife is what a token lasts when no duration is asked for; the limits, from one minute to 90 days,
 // are those of token.Service (ADR-004 D5).
 const defaultServiceTokenLife = 24 * time.Hour
 
@@ -44,7 +44,7 @@ const defaultServiceTokenLife = 24 * time.Hour
 // the subject, the role is SERVICE and there is no tenant. It needs the private key and nothing of the database.
 func issueServiceToken(args []string, getenv func(string) string, readFile func(string) ([]byte, error), now func() time.Time, stdout io.Writer) error {
 	if len(args) < 1 || len(args) > 2 {
-		return errors.New("usage: issue-service-token <name> [duration, like 24h or 720h; one minute to 30 days; 24h if absent]")
+		return errors.New("usage: issue-service-token <name> [duration, like 24h or 2160h; one minute to 90 days; 24h if absent]")
 	}
 	life := defaultServiceTokenLife
 	if len(args) == 2 {

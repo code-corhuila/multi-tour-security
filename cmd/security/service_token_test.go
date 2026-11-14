@@ -84,7 +84,7 @@ func TestC_WithoutADurationTheTokenLastsADayAndTheLimitsAreOneMinuteAndThirtyDay
 		exp, _ := claims.GetExpirationTime()
 		return exp.Sub(iat.Time), nil
 	}
-	for args, want := range map[string]time.Duration{"": 24 * time.Hour, "1m": time.Minute, "720h": 30 * 24 * time.Hour} {
+	for args, want := range map[string]time.Duration{"": 24 * time.Hour, "1m": time.Minute, "720h": 30 * 24 * time.Hour, "2160h": 90 * 24 * time.Hour} {
 		a := []string{"saga-onboard-tenant"}
 		if args != "" {
 			a = append(a, args)
@@ -93,7 +93,7 @@ func TestC_WithoutADurationTheTokenLastsADayAndTheLimitsAreOneMinuteAndThirtyDay
 			t.Errorf("%q: %v %v, want %v", args, got, err, want)
 		}
 	}
-	for _, bad := range []string{"59s", "720h1s", "0", "-1h", "0s", "abc", "30d", "1h30"} {
+	for _, bad := range []string{"59s", "2160h1s", "0", "-1h", "0s", "abc", "30d", "1h30"} {
 		if out, err := issue(t, keys, "saga-onboard-tenant", bad); err == nil || out != "" {
 			t.Errorf("%q: printed %q, err %v", bad, out, err)
 		}

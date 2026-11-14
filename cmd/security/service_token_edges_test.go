@@ -17,12 +17,12 @@ import (
 
 func TestC_ADurationInAnyFormGoUnderstandsIsJudgedByItsValue(t *testing.T) {
 	keys := writeKeys(t, 2048)
-	for _, ok := range []string{"60s", "1h30m", "1.5h", "+1h", "90m", "43200m"} {
+	for _, ok := range []string{"60s", "1h30m", "1.5h", "+1h", "90m", "129600m"} {
 		if out, err := issue(t, keys, "saga-onboard-tenant", ok); err != nil || strings.Count(out, "\n") != 1 {
 			t.Errorf("%q: %v %q", ok, err, out)
 		}
 	}
-	for _, bad := range []string{"500ms", "1us", "1ns", "59s", "9999999h", "43201m", "1e3h", "", " 1h", "1h "} {
+	for _, bad := range []string{"500ms", "1us", "1ns", "59s", "9999999h", "129601m", "1e3h", "", " 1h", "1h "} {
 		if out, err := issue(t, keys, "saga-onboard-tenant", bad); err == nil || out != "" {
 			t.Errorf("%q: printed %q, err %v", bad, out, err)
 		}
