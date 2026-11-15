@@ -114,8 +114,8 @@ refused() { # fragment, statement
 }
 # every table with a foreign key to these must be in the list, or the TRUNCATE fails and the probes say so
 clean() {
-  # the key table (HU-SEC-002) references identity, so it joins the TRUNCATE once it exists
-  extra=$(psql_admin -c "SELECT CASE WHEN to_regclass('security.idempotency_key') IS NULL THEN '' ELSE ', security.idempotency_key' END") || return 1
+  # the key table (HU-SEC-002), the link table (HU-SEC-003), the code table (HU-SEC-004) and the support access table (HU-SEC-007) reference identity, so they join the TRUNCATE once they exist
+  extra=$(psql_admin -c "SELECT CASE WHEN to_regclass('security.idempotency_key') IS NULL THEN '' ELSE ', security.idempotency_key' END || CASE WHEN to_regclass('security.email_verification') IS NULL THEN '' ELSE ', security.email_verification' END || CASE WHEN to_regclass('security.recovery_code') IS NULL THEN '' ELSE ', security.recovery_code' END || CASE WHEN to_regclass('security.membership_permission') IS NULL THEN '' ELSE ', security.membership_permission' END || CASE WHEN to_regclass('security.tenant_optional_role') IS NULL THEN '' ELSE ', security.tenant_optional_role' END || CASE WHEN to_regclass('security.support_access') IS NULL THEN '' ELSE ', security.support_access' END") || return 1
   psql_admin -c "TRUNCATE security.refresh_token, security.session, security.membership_role, security.membership, security.identity, security.tenant_copy$extra" >/dev/null || { echo "could not clean the tables"; return 1; }
 }
 identity() { # tenant (quoted uuid or NULL), e-mail, status
@@ -239,6 +239,191 @@ the_idempotency_key_follows_its_account_and_has_its_index() {
   [ "$(psql_admin -c "SELECT has_table_privilege('security_app', 'security.idempotency_key', 'INSERT,UPDATE,DELETE')")" = t ] || { echo "security_app cannot write the key table"; return 1; }
 }
 
+# ---- the probes of the e-mail verification (spec 004-hu-sec-003, task VER-02): the pending status, the link rows, the
+# commercial name of the tenant and the accounts that already exist
+psql_file() { # a SQL file run by the administrator, read from this checkout
+  docker exec -i -e PGPASSWORD="$ADMIN_PASSWORD" "$RUN_ID" psql -h 127.0.0.1 -U postgres -d "$DB" -v ON_ERROR_STOP=1 -tA < "$1"
+}
+LINK_HASH=$(printf 'ab%.0s' $(seq 1 32))
+
+a_pending_status_is_accepted_and_the_moment_of_verification_is_kept() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" ana@example.com PENDING)" >/dev/null || { echo "a PENDING account was refused"; return 1; }
+  refused chk_identity_status "$(identity "'$T1'" bob@example.com VERIFIED)" || return 1
+  [ "$(psql_admin -c "SELECT email_verified_at IS NULL FROM security.identity")" = t ] || { echo "email_verified_at must start empty"; return 1; }
+  psql_admin -c "UPDATE security.identity SET email_verified = true, email_verified_at = now(), identity_status = 'ACTIVE'" >/dev/null \
+    || { echo "email_verified_at is missing"; return 1; }
+  [ "$(psql_admin -c "SELECT email_verified_at IS NOT NULL AND identity_status = 'ACTIVE' FROM security.identity")" = t ] || { echo "the moment of verification was not kept"; return 1; }
+}
+link_rows_are_valid_unique_and_follow_their_account() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" ana@example.com PENDING)" >/dev/null || return 1
+  id=$(psql_admin -c "SELECT identity_id FROM security.identity LIMIT 1")
+  link() { printf "INSERT INTO security.email_verification (identity_id, token_hash, expires_at) VALUES ('%s', '%s', now() + interval '%s')" "$id" "$1" "${2:-24 hours}"; }
+  psql_admin -c "$(link "$LINK_HASH")" >/dev/null || { echo "a valid link row was refused"; return 1; }
+  refused idx_email_verification_token_hash "$(link "$LINK_HASH")" || return 1
+  refused chk_email_verification_hash "$(link not-a-hash)" || return 1
+  refused chk_email_verification_hash "$(link "$(printf 'AB%.0s' $(seq 1 32))")" || return 1
+  refused chk_email_verification_expiry "$(link "$(printf 'cd%.0s' $(seq 1 32))" '-1 hour')" || return 1
+  refused chk_email_verification_send_error "UPDATE security.email_verification SET send_failed_at = now(), send_error = repeat('e', 201)" || return 1
+  refused fk_email_verification_identity "INSERT INTO security.email_verification (identity_id, token_hash, expires_at) VALUES ('00000000-0000-4000-8000-0000000000ff', '$(printf 'ef%.0s' $(seq 1 32))', now() + interval '1 day')" || return 1
+  psql_admin -c "DELETE FROM security.identity WHERE identity_id = '$id'" >/dev/null || { echo "the account could not be deleted with its links"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM security.email_verification")" = 0 ] || { echo "the links did not follow their account"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = 'security' AND indexname IN ('idx_email_verification_token_hash', 'idx_email_verification_identity_created_at')")" = 2 ] || { echo "an index of the links is missing"; return 1; }
+  [ "$(psql_admin -c "SELECT has_table_privilege('security_app', 'security.email_verification', 'INSERT,UPDATE,DELETE')")" = t ] || { echo "security_app cannot write the links"; return 1; }
+}
+# ---- the probes of the password recovery (spec 006-hu-sec-004, task REC-02): the code rows
+RECOVERY_HMAC=$(printf 'ab%.0s' $(seq 1 32))
+recovery_code_rows_are_valid_and_follow_their_account() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" ana@example.com ACTIVE)" >/dev/null || return 1
+  id=$(psql_admin -c "SELECT identity_id FROM security.identity LIMIT 1")
+  code() { printf "INSERT INTO security.recovery_code (identity_id, code_hmac, expires_at) VALUES ('%s', '%s', now() + interval '%s')" "$id" "$1" "${2:-30 minutes}"; }
+  psql_admin -c "$(code "$RECOVERY_HMAC")" >/dev/null || { echo "a valid code row was refused"; return 1; }
+  [ "$(psql_admin -c "SELECT wrong_tries = 0 AND used_at IS NULL AND retired_at IS NULL FROM security.recovery_code")" = t ] || { echo "a new code must start unused with no wrong tries"; return 1; }
+  refused chk_recovery_code_hmac "$(code not-an-hmac)" || return 1
+  refused chk_recovery_code_hmac "$(code "$(printf 'AB%.0s' $(seq 1 32))")" || return 1
+  refused chk_recovery_code_expiry "$(code "$(printf 'cd%.0s' $(seq 1 32))" '-1 hour')" || return 1
+  refused chk_recovery_code_wrong_tries "UPDATE security.recovery_code SET wrong_tries = 6" || return 1
+  refused chk_recovery_code_wrong_tries "UPDATE security.recovery_code SET wrong_tries = -1" || return 1
+  psql_admin -c "UPDATE security.recovery_code SET wrong_tries = 5, retired_at = now()" >/dev/null || { echo "five wrong tries were refused"; return 1; }
+  refused chk_recovery_code_send_error "UPDATE security.recovery_code SET send_failed_at = now(), send_error = repeat('e', 201)" || return 1
+  refused fk_recovery_code_identity "INSERT INTO security.recovery_code (identity_id, code_hmac, expires_at) VALUES ('00000000-0000-4000-8000-0000000000ff', '$(printf 'ef%.0s' $(seq 1 32))', now() + interval '30 minutes')" || return 1
+  psql_admin -c "DELETE FROM security.identity WHERE identity_id = '$id'" >/dev/null || { echo "the account could not be deleted with its codes"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM security.recovery_code")" = 0 ] || { echo "the codes did not follow their account"; return 1; }
+  [ "$(psql_admin -c "SELECT count(*) FROM pg_indexes WHERE schemaname = 'security' AND indexname = 'idx_recovery_code_identity_created_at'")" = 1 ] || { echo "the index of the codes of an account is missing"; return 1; }
+  [ "$(psql_admin -c "SELECT has_table_privilege('security_app', 'security.recovery_code', 'INSERT,UPDATE,DELETE')")" = t ] || { echo "security_app cannot write the codes"; return 1; }
+}
+the_tenant_copy_keeps_an_optional_commercial_name() {
+  clean || return 1
+  psql_admin -c "INSERT INTO security.tenant_copy (tenant_id, identifier, status, occurred_at) VALUES ('$T1', 'acme-tours', 'ACTIVE', now())" >/dev/null || { echo "a copy without a name was refused"; return 1; }
+  [ "$(psql_admin -c "SELECT commercial_name IS NULL FROM security.tenant_copy")" = t ] || { echo "the commercial name must start empty"; return 1; }
+  psql_admin -c "UPDATE security.tenant_copy SET commercial_name = 'Acme Tours SAS'" >/dev/null || { echo "the commercial name is missing"; return 1; }
+  [ "$(psql_admin -c "SELECT commercial_name FROM security.tenant_copy")" = 'Acme Tours SAS' ] || { echo "the commercial name was not kept"; return 1; }
+  refused chk_tenant_copy_commercial_name "UPDATE security.tenant_copy SET commercial_name = ''" || return 1
+  refused chk_tenant_copy_commercial_name "UPDATE security.tenant_copy SET commercial_name = repeat('n', 101)"
+}
+the_account_keeps_who_when_and_why_of_a_change_and_of_a_temporary_credential() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" luis@example.com)" >/dev/null || { echo "an account that never changed was refused"; return 1; }
+  [ "$(psql_admin -c "SELECT status_changed_at IS NULL AND status_changed_by IS NULL AND status_reason IS NULL AND temporary_issued_at IS NULL AND temporary_issued_by IS NULL FROM security.identity")" = t ] || { echo "the trace must start empty"; return 1; }
+  psql_admin -c "UPDATE security.identity SET status_changed_at = now(), status_changed_by = 'tenant-administrator/7a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d', status_reason = repeat('r', 500)" >/dev/null || { echo "a change of status with its trace was refused"; return 1; }
+  psql_admin -c "UPDATE security.identity SET temporary_issued_at = now(), temporary_issued_by = 'platform-administrator/7a1d2c3b-4e5f-4a6b-8c7d-9e0f1a2b3c4d'" >/dev/null || { echo "a temporary credential with its trace was refused"; return 1; }
+  # who, when and why of a change are kept together, and so are who and when of a temporary credential
+  refused chk_identity_status_trace "UPDATE security.identity SET status_reason = NULL" || return 1
+  refused chk_identity_status_trace "UPDATE security.identity SET status_changed_by = NULL" || return 1
+  refused chk_identity_status_trace "UPDATE security.identity SET status_changed_at = NULL" || return 1
+  refused chk_identity_status_reason "UPDATE security.identity SET status_reason = ''" || return 1
+  refused chk_identity_status_reason "UPDATE security.identity SET status_reason = repeat('r', 501)" || return 1
+  refused chk_identity_status_changed_by "UPDATE security.identity SET status_changed_by = ''" || return 1
+  refused chk_identity_temporary_trace "UPDATE security.identity SET temporary_issued_by = NULL" || return 1
+  refused chk_identity_temporary_trace "UPDATE security.identity SET temporary_issued_at = NULL" || return 1
+  refused chk_identity_temporary_issued_by "UPDATE security.identity SET temporary_issued_by = repeat('a', 101)"
+}
+the_listing_of_users_has_its_index() {
+  clean || return 1
+  def=$(psql_admin -c "SELECT indexdef FROM pg_indexes WHERE schemaname = 'security' AND indexname = 'idx_identity_tenant_id_created_at'")
+  [ -n "$def" ] || { echo "the index of the listing of users does not exist"; return 1; }
+  case "$def" in
+    *"(tenant_id, created_at DESC, identity_id DESC)"*) ;;
+    *) echo "the index must be on (tenant_id, created_at DESC, identity_id DESC): $def"; return 1 ;;
+  esac
+}
+existing_unverified_customer_accounts_become_pending() {
+  clean || return 1
+  role() { # the account of an e-mail gets a membership with this role
+    psql_admin -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity WHERE email_normalized = '$1' ON CONFLICT DO NOTHING" \
+               -c "INSERT INTO security.membership_role (membership_id, role) SELECT m.membership_id, '$2' FROM security.membership m JOIN security.identity i USING (identity_id) WHERE i.email_normalized = '$1'" >/dev/null
+  }
+  psql_admin -c "$(identity "'$T1'" customer@example.com)" -c "$(identity "'$T1'" verified@example.com)" \
+             -c "$(identity "'$T1'" staff@example.com)" -c "$(identity "'$T1'" both@example.com)" -c "$(identity NULL root@example.com)" \
+             -c "$(identity "'$T1'" temporary@example.com)" -c "$(identity NULL notenant@example.com)" -c "$(identity "'$T1'" gone@example.com INACTIVE)" \
+             -c "$(identity "'$T1'" admin@example.com)" -c "$(identity "'$T1'" noroles@example.com)" >/dev/null || return 1
+  psql_admin -c "UPDATE security.identity SET email_verified = true WHERE email_normalized = 'verified@example.com'" \
+             -c "UPDATE security.identity SET temporary_until = now() + interval '1 day' WHERE email_normalized = 'temporary@example.com'" >/dev/null || return 1
+  role customer@example.com FINAL_CUSTOMER && role verified@example.com FINAL_CUSTOMER && role staff@example.com ANALYST \
+    && role both@example.com FINAL_CUSTOMER && role both@example.com ANALYST && role root@example.com PLATFORM_ADMINISTRATOR \
+    && role temporary@example.com FINAL_CUSTOMER && role notenant@example.com FINAL_CUSTOMER && role gone@example.com FINAL_CUSTOMER \
+    && role admin@example.com TENANT_ADMINISTRATOR || return 1
+  status() { psql_admin -c "SELECT identity_status FROM security.identity WHERE email_normalized = '$1'"; }
+
+  psql_file db/02_dml/001_pending_for_unverified_customers.sql >/dev/null || { echo "the data migration did not run"; return 1; }
+  [ "$(status customer@example.com)" = PENDING ] || { echo "an unverified customer account did not become pending"; return 1; }
+  for e in verified@example.com staff@example.com both@example.com root@example.com temporary@example.com notenant@example.com admin@example.com noroles@example.com; do
+    [ "$(status $e)" = ACTIVE ] || { echo "$e must stay active"; return 1; }
+  done
+  [ "$(status gone@example.com)" = INACTIVE ] || { echo "an inactive customer must stay inactive"; return 1; }
+  psql_file db/05_rollbacks/02_dml/001_pending_for_unverified_customers.rollback.sql >/dev/null || { echo "its rollback did not run"; return 1; }
+  [ "$(status customer@example.com)" = ACTIVE ] || { echo "the rollback did not restore the account"; return 1; }
+}
+
+# ---- the probes of the permissions and the optional roles (spec 005-hu-sec-006, task PERM-02)
+membership() { # e-mail, role: the account of that e-mail gets a membership with this role, and its id is printed
+  psql_admin -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity WHERE email_normalized = '$1' ON CONFLICT DO NOTHING" \
+             -c "INSERT INTO security.membership_role (membership_id, role) SELECT m.membership_id, '$2' FROM security.membership m JOIN security.identity i USING (identity_id) WHERE i.email_normalized = '$1'" >/dev/null &&
+    psql_admin -c "SELECT m.membership_id FROM security.membership m JOIN security.identity i USING (identity_id) WHERE i.email_normalized = '$1'"
+}
+the_permissions_of_a_user_are_the_four_and_keep_who_and_when() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" colab@example.com)" >/dev/null || return 1
+  m=$(membership colab@example.com OPERATIONAL_COLLABORATOR) || return 1
+  grant() { printf "INSERT INTO security.membership_permission (membership_id, permission, granted_at, granted_by) VALUES ('%s', '%s', now(), '%s')" "$m" "$1" "${2-tenant-administrator/x}"; }
+  for p in VALIDATE_PAYMENT_PROOFS MANAGE_CASH MANAGE_DEPARTURE_EXECUTION CONSULT_SENSITIVE_DATA; do
+    psql_admin -c "$(grant $p)" >/dev/null || { echo "$p was refused"; return 1; }
+  done
+  refused pk_membership_permission "$(grant MANAGE_CASH)" || return 1
+  psql_admin -c "DELETE FROM security.membership_permission" >/dev/null || return 1
+  refused chk_membership_permission_permission "$(grant SUPERUSER)" || return 1
+  refused chk_membership_permission_permission "$(grant manage_cash)" || return 1
+  refused chk_membership_permission_granted_by "$(grant MANAGE_CASH '')" || return 1
+  refused chk_membership_permission_granted_by "$(grant MANAGE_CASH "$(printf 'a%.0s' $(seq 1 101))")" || return 1
+  psql_admin -c "$(grant MANAGE_CASH)" >/dev/null || return 1
+  # who and when of a removal are written together, or not at all
+  refused chk_membership_permission_revoked_trace "UPDATE security.membership_permission SET revoked_at = now()" || return 1
+  refused chk_membership_permission_revoked_trace "UPDATE security.membership_permission SET revoked_by = 'tenant-administrator/x'" || return 1
+  refused chk_membership_permission_revoked_by "UPDATE security.membership_permission SET revoked_at = now(), revoked_by = ''" || return 1
+  psql_admin -c "UPDATE security.membership_permission SET revoked_at = now(), revoked_by = 'tenant-administrator/x'" >/dev/null || { echo "a removal with its trace was refused"; return 1; }
+  ghost=00000000-0000-4000-8000-0000000000ff
+  refused fk_membership_permission_membership "INSERT INTO security.membership_permission (membership_id, permission, granted_at, granted_by) VALUES ('$ghost', 'MANAGE_CASH', now(), 'x')" || return 1
+  psql_admin -c "DELETE FROM security.membership WHERE membership_id = '$m'" >/dev/null || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM security.membership_permission")" = 0 ] || { echo "a permission did not follow its membership"; return 1; }
+}
+a_tenant_enables_only_the_three_optional_roles_once_each() {
+  clean || return 1
+  r() { printf "INSERT INTO security.tenant_optional_role (tenant_id, role, enabled, changed_at, changed_by) VALUES ('%s', '%s', true, now(), '%s')" "$1" "$2" "${3-tenant-administrator/x}"; }
+  for role in MANAGER ACCOUNTANT ANALYST; do
+    psql_admin -c "$(r $T1 $role)" >/dev/null || { echo "$role was refused"; return 1; }
+  done
+  psql_admin -c "$(r $T2 MANAGER)" >/dev/null || { echo "another tenant cannot enable the same role"; return 1; }
+  refused pk_tenant_optional_role "$(r $T1 MANAGER)" || return 1
+  for role in TENANT_ADMINISTRATOR OPERATIONAL_COLLABORATOR FINAL_CUSTOMER manager; do
+    refused chk_tenant_optional_role_role "$(r $T2 $role)" || return 1
+  done
+  refused chk_tenant_optional_role_changed_by "$(r $T2 ANALYST '')"
+}
+the_app_user_writes_the_permissions_and_the_optional_roles() {
+  for t in membership_permission tenant_optional_role; do
+    [ "$(psql_admin -c "SELECT has_table_privilege('security_app', 'security.$t', 'INSERT,UPDATE,DELETE')")" = t ] || { echo "security_app cannot write security.$t"; return 1; }
+  done
+}
+a_tenant_with_existing_managers_starts_with_manager_enabled() {
+  clean || return 1
+  psql_admin -c "$(identity "'$T1'" m1@example.com)" -c "$(identity "'$T1'" m2@example.com)" -c "$(identity "'$T1'" gone@example.com INACTIVE)" \
+             -c "$(identity "'$T1'" admin@example.com)" -c "$(identity "'$T2'" colab@example.com)" >/dev/null || return 1
+  { membership m1@example.com MANAGER && membership m2@example.com MANAGER && membership gone@example.com ANALYST \
+    && membership admin@example.com TENANT_ADMINISTRATOR && membership colab@example.com OPERATIONAL_COLLABORATOR; } >/dev/null || return 1
+  rows() { psql_admin -c "SELECT coalesce(string_agg(tenant_id::text || ':' || role || ':' || enabled || ':' || changed_by, ',' ORDER BY tenant_id, role), '') FROM security.tenant_optional_role"; }
+  psql_file db/02_dml/002_enable_optional_roles_in_use.sql >/dev/null || { echo "the data migration did not run"; return 1; }
+  # the managers and the inactive analyst of the first tenant enable their roles; the second tenant has none
+  [ "$(rows)" = "$T1:ANALYST:true:migration/security-dml-002,$T1:MANAGER:true:migration/security-dml-002" ] || { echo "the migration enabled: $(rows)"; return 1; }
+  psql_file db/02_dml/002_enable_optional_roles_in_use.sql >/dev/null || return 1
+  [ "$(psql_admin -c "SELECT count(*) FROM security.tenant_optional_role")" = 2 ] || { echo "a second run changed the rows"; return 1; }
+  # the rollback removes only what the migration wrote, never a change an Administrator made afterwards
+  psql_admin -c "UPDATE security.tenant_optional_role SET changed_by = 'tenant-administrator/x' WHERE role = 'ANALYST'" >/dev/null || return 1
+  psql_file db/05_rollbacks/02_dml/002_enable_optional_roles_in_use.rollback.sql >/dev/null || { echo "its rollback did not run"; return 1; }
+  [ "$(rows)" = "$T1:ANALYST:true:tenant-administrator/x" ] || { echo "the rollback left: $(rows)"; return 1; }
+}
+
 # ---- an empty instance, as multi-tour-infra-postgres leaves it for this domain (J.7)
 docker build -q -f deploy/liquibase.Dockerfile -t "$LIQUIBASE_IMAGE" deploy >/dev/null || { echo "the runner image did not build"; exit 1; }
 docker network create "$RUN_ID" >/dev/null || exit 1
@@ -253,6 +438,25 @@ psql_admin -c "CREATE EXTENSION IF NOT EXISTS pgcrypto" \
            -c "CREATE ROLE security_app LOGIN PASSWORD '$APP_PASSWORD'" \
            -c "ALTER ROLE security_app SET search_path = security" \
            -c "CREATE SCHEMA other_domain" -c "CREATE TABLE other_domain.probe (id int)" >/dev/null || exit 1
+
+# ---- HU-SEC-007 part B (spec 010, task SEC10-02): the emergency access reuses support_access and adds its basis, its statement and the sensitive data
+an_emergency_access_keeps_its_basis_its_statement_and_its_sensitive_reason() {
+  clean || return 1; psql_admin -c "$(identity NULL root@example.com)" >/dev/null || return 1
+  id=$(psql_admin -c "SELECT identity_id FROM security.identity LIMIT 1")
+  base="INSERT INTO security.support_access (tenant_id, requested_by, request_key, reason, areas, hours, status, requested_at"
+  psql_admin -c "$base) VALUES ('$T1', '$id', 'key-part-a-1', 'r', ARRAY['CASH'], 4, 'PENDING', now())" >/dev/null || return 1
+  [ "$(psql_admin -c "SELECT basis || ':' || sensitive FROM security.support_access")" = "TENANT_AUTHORIZATION:false" ] || { echo "an old row must read as an authorized access, not sensitive"; return 1; }
+  e="$base, basis, statement, sensitive, sensitive_reason"
+  refused chk_support_access_basis "$e) VALUES ('$T1', '$id', 'key-emergency-1', 'r', ARRAY['CASH'], 4, 'APPROVED', now(), 'OTHER', NULL, false, NULL)" || return 1
+  refused chk_support_access_emergency_statement "$e) VALUES ('$T1', '$id', 'key-emergency-2', 'r', ARRAY['CASH'], 4, 'APPROVED', now(), 'EMERGENCY', NULL, false, NULL)" || return 1
+  refused chk_support_access_emergency_statement "$base, statement) VALUES ('$T1', '$id', 'key-emergency-3', 'r', ARRAY['CASH'], 4, 'PENDING', now(), 'a statement of an authorized access')" || return 1
+  refused chk_support_access_sensitive_reason "$e) VALUES ('$T1', '$id', 'key-emergency-4', 'r', ARRAY['CASH'], 4, 'APPROVED', now(), 'EMERGENCY', 's', true, NULL)" || return 1
+  refused chk_support_access_sensitive_reason "$e) VALUES ('$T1', '$id', 'key-emergency-5', 'r', ARRAY['CASH'], 4, 'APPROVED', now(), 'EMERGENCY', 's', false, 'a reason without the flag')" || return 1
+  refused chk_support_access_sensitive_emergency "$base, sensitive, sensitive_reason) VALUES ('$T1', '$id', 'key-emergency-6', 'r', ARRAY['CASH'], 4, 'PENDING', now(), true, 'only an emergency may be sensitive')" || return 1
+  refused chk_support_access_emergency_decider "$base, decided_by, basis, statement) VALUES ('$T1', '$id', 'key-emergency-7', 'r', ARRAY['CASH'], 4, 'APPROVED', now(), '$id', 'EMERGENCY', 's')" || return 1
+  psql_admin -c "$e) VALUES ('$T1', '$id', 'key-emergency-8', 'r', ARRAY['CASH'], 4, 'APPROVED', now(), 'EMERGENCY', 's', true, 'the medical record of the incident')" >/dev/null || return 1
+  [ "$(psql_admin -c "SELECT basis || ':' || statement || ':' || sensitive || ':' || sensitive_reason FROM security.support_access WHERE request_key = 'key-emergency-8'")" = "EMERGENCY:s:true:the medical record of the incident" ] || { echo "an emergency access did not keep what it was given"; return 1; }
+}
 
 check "I·db_ci_builds_from_empty" lb update
 check "I·db_ci_second_update_changes_nothing" second_update_changes_nothing
@@ -271,7 +475,28 @@ check "I·the_app_user_writes_the_new_tables_and_the_indexes_exist" the_app_user
 check "I·a_profile_is_optional_and_refuses_a_name_or_phone_out_of_range" a_profile_is_optional_and_refuses_a_name_or_phone_out_of_range
 check "I·the_idempotency_key_is_unique_per_scope_and_between_8_and_128_characters" the_idempotency_key_is_unique_per_scope_and_between_8_and_128_characters
 check "I·the_idempotency_key_follows_its_account_and_has_its_index" the_idempotency_key_follows_its_account_and_has_its_index
+check "I·a_pending_status_is_accepted_and_the_moment_of_verification_is_kept" a_pending_status_is_accepted_and_the_moment_of_verification_is_kept
+check "I·link_rows_are_valid_unique_and_follow_their_account" link_rows_are_valid_unique_and_follow_their_account
+check "I·recovery_code_rows_are_valid_and_follow_their_account" recovery_code_rows_are_valid_and_follow_their_account
+check "I·the_tenant_copy_keeps_an_optional_commercial_name" the_tenant_copy_keeps_an_optional_commercial_name
+check "I·the_account_keeps_who_when_and_why_of_a_change_and_of_a_temporary_credential" the_account_keeps_who_when_and_why_of_a_change_and_of_a_temporary_credential
+check "I·the_listing_of_users_has_its_index" the_listing_of_users_has_its_index
+check "I·existing_unverified_customer_accounts_become_pending" existing_unverified_customer_accounts_become_pending
+check "I·the_permissions_of_a_user_are_the_four_and_keep_who_and_when" the_permissions_of_a_user_are_the_four_and_keep_who_and_when
+check "I·a_tenant_enables_only_the_three_optional_roles_once_each" a_tenant_enables_only_the_three_optional_roles_once_each
+check "I·the_app_user_writes_the_permissions_and_the_optional_roles" the_app_user_writes_the_permissions_and_the_optional_roles
+check "I·a_tenant_with_existing_managers_starts_with_manager_enabled" a_tenant_with_existing_managers_starts_with_manager_enabled
+check "I·an_emergency_access_keeps_its_basis_its_statement_and_its_sensitive_reason" an_emergency_access_keeps_its_basis_its_statement_and_its_sensitive_reason
+# a pending account, a link row, a verified moment and a commercial name exist when the rollback runs, which must still
+# leave the instance empty
 clean
+psql_admin -c "$(identity "'$T1'" ana@example.com PENDING)" \
+           -c "INSERT INTO security.email_verification (identity_id, token_hash, expires_at) SELECT identity_id, '$LINK_HASH', now() + interval '1 day' FROM security.identity" \
+           -c "UPDATE security.identity SET email_verified_at = now()" \
+           -c "INSERT INTO security.tenant_copy (tenant_id, identifier, status, occurred_at, commercial_name) VALUES ('$T1', 'acme-tours', 'ACTIVE', now(), 'Acme Tours SAS')" \
+           -c "INSERT INTO security.recovery_code (identity_id, code_hmac, expires_at) SELECT identity_id, '$RECOVERY_HMAC', now() + interval '30 minutes' FROM security.identity" \n           -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity" \
+           -c "INSERT INTO security.membership (identity_id, created_by) SELECT identity_id, 'test' FROM security.identity" \n           -c "INSERT INTO security.membership_permission (membership_id, permission, granted_at, granted_by) SELECT membership_id, 'MANAGE_CASH', now(), 'tenant-administrator/x' FROM security.membership" \
+           -c "INSERT INTO security.tenant_optional_role (tenant_id, role, enabled, changed_at, changed_by) VALUES ('$T1', 'MANAGER', true, now(), 'tenant-administrator/x')" >/dev/null
 check "I·db_ci_rolls_back_to_empty" rolled_back_to_empty
 check "I·db_ci_rebuilds_after_the_rollback" lb update
 check "I·security_app_writes_only_its_schema_after_the_rebuild" writes_only_its_schema

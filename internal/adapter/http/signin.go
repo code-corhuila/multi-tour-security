@@ -31,6 +31,7 @@ func WithSignIn(service SignInService) Option {
 type signInBody struct {
 	Email    *string `json:"email"`
 	Password *string `json:"password"`
+	Context  *string `json:"context"`
 }
 
 type sessionBody struct {
@@ -61,7 +62,7 @@ func (s *server) signInWith(w http.ResponseWriter, r *http.Request, identifier s
 		return
 	}
 	tokens, err := call(r.Context(), signin.Request{
-		TenantIdentifier: identifier, Email: *body.Email, Password: *body.Password, CorrelationID: traceID(r.Context()),
+		TenantIdentifier: identifier, Email: *body.Email, Password: *body.Password, Context: deref(body.Context), CorrelationID: traceID(r.Context()),
 	})
 	s.answerTokens(w, r, tokens, err, "sign-in")
 }
@@ -110,6 +111,10 @@ func (s *server) answerTokens(w http.ResponseWriter, r *http.Request, tokens sig
 	switch {
 	case errors.Is(err, signin.ErrRefused):
 		writeError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "authentication failed")
+	case errors.Is(err, signin.ErrEmailNotVerified):
+		// the one refusal that is not the generic 401, and only after the right password: the details let the portal offer a new link
+		writeEnvelope(w, r, http.StatusForbidden, errorBody{Error: "FORBIDDEN", Message: "the e-mail of the account is not verified",
+			Details: []fieldDetail{{Field: "email", Message: "EMAIL_NOT_VERIFIED"}}})
 	case errors.Is(err, signin.ErrInvalidRequest):
 		writeError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", "the request is not valid")
 	case err != nil:
@@ -151,4 +156,11 @@ func (s *server) renew(w http.ResponseWriter, r *http.Request) {
 	}
 	tokens, err := s.refresh.Renew(r.Context(), *body.RefreshToken)
 	s.answerTokens(w, r, tokens, err, "renewal")
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

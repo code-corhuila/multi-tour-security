@@ -5,6 +5,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/code-corhuila/multi-tour-security/internal/core/account"
@@ -16,7 +17,10 @@ import (
 // ErrAccountNotFound is an operation on an account that does not exist; a lookup answers found=false instead.
 var ErrAccountNotFound = errors.New("the account does not exist")
 
-var _ port.Accounts = (*Accounts)(nil)
+var (
+	_ port.Accounts  = (*Accounts)(nil)
+	_ port.RolesHeld = (*Accounts)(nil)
+)
 
 // Accounts reads and updates security.identity.
 type Accounts struct {
@@ -36,11 +40,26 @@ func scanAccount(row pgx.Row, extra ...any) (account.Account, error) {
 	if err := row.Scan(dest...); err != nil {
 		return account.Account{}, err
 	}
-	if status == "INACTIVE" {
-		a.Status = account.Inactive
+	var err error
+	if a.Status, err = statusOf(status); err != nil {
+		return account.Account{}, err
 	}
 	a.TemporaryUntil, a.FirstFailedAt, a.BlockedUntil = utc(temporary), utc(first), utc(blocked)
 	return a, nil
+}
+
+// statusOf reads the status of the table. Active is the zero value of the core, so an unknown text must be an error and
+// never an active account.
+func statusOf(text string) (account.Status, error) {
+	switch text {
+	case "ACTIVE":
+		return account.Active, nil
+	case "INACTIVE":
+		return account.Inactive, nil
+	case "PENDING":
+		return account.Pending, nil
+	}
+	return account.Active, fmt.Errorf("the status %q of an account is not known", text)
 }
 
 func utc(t *time.Time) time.Time {
@@ -123,8 +142,8 @@ WITH changed AS (
 )
 INSERT INTO security.outbox_event (tenant_id, event_type, aggregate_id, payload, correlation_id, occurred_at)
 SELECT tenant_id, 'AccountSessionsRevoked', identity_id,
-       jsonb_build_object('accountId', identity_id,
-           'revokedFrom', to_char(sessions_revoked_from AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')),
+       jsonb_strip_nulls(jsonb_build_object('accountId', identity_id, 'tenantId', tenant_id,
+           'revokedFrom', to_char(sessions_revoked_from AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))),
        $4, $3::timestamptz
 FROM changed`
 
@@ -147,11 +166,33 @@ func (r *Accounts) RecordSuccess(ctx context.Context, id string) error {
 	return err
 }
 
-// RolesOf gives the roles of the active membership of the account, by name.
+// PermissionsOf gives the special permissions assigned to the account that it holds now, by name: the rows of its active membership with no
+// removal. A membership that is not active gives none, as it gives no role. The status of the account is the sign-in's to refuse.
+func (r *Accounts) PermissionsOf(ctx context.Context, id string) ([]string, error) {
+	var held []string
+	err := r.pool.QueryRow(ctx, `SELECT COALESCE(array_agg(p.permission ORDER BY p.permission), '{}') FROM security.membership m
+		JOIN security.membership_permission p USING (membership_id)
+		WHERE m.identity_id = $1::uuid AND m.membership_status = 'ACTIVE' AND p.revoked_at IS NULL`, id).Scan(&held)
+	if held == nil {
+		held = []string{}
+	}
+	return held, err
+}
+
+// RolesOf gives the active roles of the active membership of the account, by name: the team side of a person who is also a customer can be off.
 func (r *Accounts) RolesOf(ctx context.Context, id string) ([]string, error) {
+	return r.roles(ctx, id, `AND mr.role_status = 'ACTIVE'`)
+}
+
+// RolesHeld gives the roles of the active membership whatever their status: a person whose team side is off still holds the internal role.
+func (r *Accounts) RolesHeld(ctx context.Context, id string) ([]string, error) {
+	return r.roles(ctx, id, ``)
+}
+
+func (r *Accounts) roles(ctx context.Context, id, filter string) ([]string, error) {
 	rows, err := r.pool.Query(ctx, `SELECT mr.role FROM security.membership m
 		JOIN security.membership_role mr USING (membership_id)
-		WHERE m.identity_id = $1::uuid AND m.membership_status = 'ACTIVE' ORDER BY mr.role`, id)
+		WHERE m.identity_id = $1::uuid AND m.membership_status = 'ACTIVE' `+filter+` ORDER BY mr.role`, id)
 	if err != nil {
 		return nil, err
 	}

@@ -42,6 +42,9 @@ func (f *fakeTenants) FindByID(context.Context, string) (tenant.Copy, bool, erro
 type fakeAccounts struct {
 	byKey     map[string]account.Account // tenantID + "|" + e-mail
 	roles     map[string][]string
+	assigned  map[string][]string // the permissions assigned to each account and held now
+	permCalls int
+	permErr   error
 	failures  []string // ids of the accounts that got a failure
 	correl    []string
 	successes []string
@@ -82,19 +85,26 @@ func (f *fakeAccounts) RolesOf(_ context.Context, id string) ([]string, error) {
 	return f.roles[id], f.rolesErr
 }
 
+func (f *fakeAccounts) PermissionsOf(_ context.Context, id string) ([]string, error) {
+	f.permCalls++
+	return f.assigned[id], f.permErr
+}
+
 type fakeSessions struct {
 	opened []string // the hash of each first value
+	sides  []string // the side each session was opened for
 	owners []string
 	at     []time.Time
 	err    error
 }
 
-func (f *fakeSessions) Open(_ context.Context, accountID, hash string, at time.Time) (string, error) {
+func (f *fakeSessions) Open(_ context.Context, accountID, hash, side string, at time.Time) (string, error) {
 	if f.err != nil {
 		return "", f.err
 	}
 	f.opened = append(f.opened, hash)
 	f.owners = append(f.owners, accountID)
+	f.sides = append(f.sides, side)
 	f.at = append(f.at, at)
 	return "session-1", nil
 }

@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Multitour security
-  version: 0.3.0
+  version: 0.13.0
   description: >
     The tested copy of the design contract 07-api/contracts/openapi/security.yaml in multi-tour-docs
     (ADR-004 D7). It carries only the operations the service implements; every story adds its operations here
@@ -43,7 +43,10 @@ paths:
         E-mail and password of an account of the tenant of the link /t/{identifier}. Every refusal (wrong password,
         unknown e-mail, account of another tenant, unknown tenant, blocked account, inactive account) is the same 401.
         A temporary credential gets a token with empty roles, access password-change and no refresh token; the
-        Administrator of an inactive tenant gets access restricted and no refresh token.
+        Administrator of an inactive tenant gets access restricted and no refresh token. A PENDING account (HU-SEC-003)
+        that gives its right password gets 403 with details naming the field email and the message EMAIL_NOT_VERIFIED,
+        and no token; with a wrong password it gets the same 401 as everyone, so nothing tells a stranger that the
+        e-mail has an account.
       operationId: signIn
       tags: [Sessions]
       security: []
@@ -70,6 +73,8 @@ paths:
           $ref: '#/components/responses/Error'
         "401":
           $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
         "413":
           $ref: '#/components/responses/Error'
         "415":
@@ -139,9 +144,10 @@ paths:
       summary: Create a Final Customer account in the tenant of a link
       description: >
         A person creates the account of a Final Customer inside the tenant of the link /t/{identifier}: the tenant is
-        the one of the path and nothing in the body changes it. The account is created ACTIVE with the role
-        FINAL_CUSTOMER and an ordinary password. The e-mail is not verified yet (HU-SEC-003), so emailVerified is false
-        and the account can sign in all the same. The e-mail is lower-cased and trimmed; the same e-mail in another
+        the one of the path and nothing in the body changes it. The account is created PENDING with the role
+        FINAL_CUSTOMER, an ordinary password and emailVerified false, and a link that lasts 24 hours is sent to the
+        e-mail (HU-SEC-003); it cannot sign in until it verifies the e-mail. A failed send is recorded and the answer is
+        still 201. A repeat with the same key sends no second link. The e-mail is lower-cased and trimmed; the same e-mail in another
         tenant is another account, and in the same tenant it is refused with 422, also when the existing account is
         inactive. A tenant that does not exist is 404; one that is not ACTIVE is 422 and creates nothing. A password that
         breaks the policy or a confirmation that differs is 400 with the field in details. A repeat with the same
@@ -178,6 +184,838 @@ paths:
         "413":
           $ref: '#/components/responses/Error'
         "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/platform-emergency-accesses:
+    post:
+      summary: Open an emergency access to a tenant
+      description: >
+        The Platform Administrator opens an emergency access when a critical incident leaves no way to obtain the authorization of a Tenant
+        Administrator (HU-SEC-007, part B): a justification and a statement of why the authorization was not possible (1 to 500 characters
+        each), the areas needed from the closed list, 1 to 24 hours and, only when really needed, sensitive true with its own justification
+        sensitiveReason, different from the general one. It needs no approval and starts at once; its hours run from the opening, and the
+        fact PlatformExceptionalAccessOpened with basis EMERGENCY is written in the same step. The token, the closing and the listing are those
+        of the support access. A tenant that does not exist or is pending or failed is 404; an inactive one is accepted. A second open
+        access of the same Platform Administrator to the same tenant is 422. The same Idempotency-Key answers the same access with 200.
+        Only a token with the role PLATFORM_ADMINISTRATOR, no tenant and no access mark is accepted.
+      operationId: openEmergencyAccess
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEmergencyAccessRequest'
+      responses:
+        "201":
+          description: The emergency access is open
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccess'
+        "200":
+          description: The same key already opened it; the access as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccess'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/platform-support-accesses:
+    post:
+      summary: Ask for a support access to a tenant
+      description: >
+        The Platform Administrator asks to enter one tenant for support (HU-SEC-007, part A): a reason of 1 to 500 characters, the areas
+        needed from the closed list RESERVATIONS, CATALOG, OPERATIONS, CASH and CUSTOMERS (never the sensitive data) and 1 to 24 hours.
+        The request waits 72 hours for a Tenant Administrator of that tenant, then it is EXPIRED. A tenant that does not exist or is
+        pending or failed is 404; an inactive one is accepted. A field that is not in the contract is 400. The same Idempotency-Key
+        answers the same request with 200. Only a token with the role PLATFORM_ADMINISTRATOR, no tenant and no access mark is accepted.
+      operationId: askForSupportAccess
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSupportAccessRequest'
+      responses:
+        "201":
+          description: The support access was asked for
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccess'
+        "200":
+          description: The same key already asked for it; the request as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccess'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+    get:
+      summary: List the support accesses the Platform Administrator asked for
+      description: >
+        Only the requests of the caller, newest first, with the listing envelope. status narrows to one status; a parameter that is not
+        declared, a repeated one or a value out of range is 400. Only a token with the role PLATFORM_ADMINISTRATOR, no tenant and no
+        access mark is accepted.
+      operationId: listPlatformSupportAccesses
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: status
+          in: query
+          schema: {$ref: '#/components/schemas/SupportAccessStatus'}
+      responses:
+        "200":
+          description: One page of support accesses
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccessPage'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/support-accesses:
+    get:
+      summary: List the support accesses asked for the tenant
+      description: >
+        The Tenant Administrator lists the support requests that concern the tenant of the token (HU-SEC-007, part A), newest first, with the
+        listing envelope. The tenant is the tenantId of the token and no parameter can change it; a parameter that is not declared, a
+        repeated one or a value out of range is 400. status narrows to one status. Only a token with the role TENANT_ADMINISTRATOR and a
+        tenant is accepted, with no mark or with the restricted access of an inactive tenant.
+      operationId: listSupportAccesses
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: status
+          in: query
+          schema: {$ref: '#/components/schemas/SupportAccessStatus'}
+      responses:
+        "200":
+          description: One page of support accesses
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccessPage'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/support-accesses/{supportAccessId}/approval:
+    post:
+      summary: Approve a support access
+      description: >
+        A Tenant Administrator of the tenant approves a PENDING request: from that moment the hours asked run, never more than 24, and the
+        access ends by itself. Another status, or a request nobody decided in 72 hours, is 422 INVALID_STATUS_TRANSITION; a request of
+        another tenant or one that does not exist is 404. Only a token with the role TENANT_ADMINISTRATOR and a tenant is accepted, with no
+        mark or with the restricted access of an inactive tenant.
+      operationId: approveSupportAccess
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: supportAccessId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The support access as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccess'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/support-accesses/{supportAccessId}/rejection:
+    post:
+      summary: Reject a support access
+      description: >
+        A Tenant Administrator of the tenant rejects a PENDING request, with a reason of 1 to 500 characters. Another status is 422
+        INVALID_STATUS_TRANSITION; a request of another tenant or one that does not exist is 404; a field that is not in the contract is 400.
+        Only a token with the role TENANT_ADMINISTRATOR and a tenant is accepted, with no mark or with the restricted access.
+      operationId: rejectSupportAccess
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: supportAccessId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusChangeRequest'
+      responses:
+        "200":
+          description: The support access as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccess'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/platform-support-accesses/{supportAccessId}/token:
+    post:
+      summary: Take the token of an approved support access
+      description: >
+        The Platform Administrator who asked for the access takes a token with `access: exceptional`, the `scope` of the approved areas and the
+        `authorizationId`, which ends when the access ends (never more than 24 hours). The first call opens the access and writes
+        `PlatformExceptionalAccessOpened`; a later call gives a new token and writes nothing. An access that is not approved, is over or is already
+        closed is 422 INVALID_STATUS_TRANSITION; one that does not exist or is another administrator's is 404. Only the ordinary session of the
+        Platform Administrator is accepted: not a restricted token and not the exceptional token itself. The token is never logged.
+      operationId: takeSupportAccessToken
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: supportAccessId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: The token of the access
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccessToken'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/platform-support-accesses/{supportAccessId}/closure:
+    post:
+      summary: Close a support access before its time
+      description: >
+        The Platform Administrator who asked for the access closes it with a reason of 1 to 500 characters, using the ordinary session or the
+        exceptional token of that same access (never the token of another one). Sessions of that administrator are cut (`AccountSessionsRevoked`,
+        reason `SUPPORT_ACCESS_CLOSED`) and, if the access had been opened, `PlatformExceptionalAccessClosed` with `endedBy: CLOSED_EARLY` is written.
+        An access that is not approved or is over is 422 INVALID_STATUS_TRANSITION; one that does not exist or is another administrator's is 404.
+      operationId: closeSupportAccess
+      tags: [Support access]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: supportAccessId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusChangeRequest'
+      responses:
+        "200":
+          description: The support access as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportAccess'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/users:
+    get:
+      summary: List the internal users of the tenant
+      description: >
+        The Tenant Administrator lists the users of their own tenant that hold one of the five internal roles, newest first,
+        with the listing envelope (HU-SEC-005). A Final Customer is never listed. The tenant is the tenantId of the token and
+        no parameter can change it; a parameter that is not declared, a repeated one or a value out of range is 400 and is
+        never trimmed. role narrows to one internal role and status to ACTIVE, INACTIVE or PENDING. The answer never carries
+        a password or a hash. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
+      operationId: listInternalUsers
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+        - name: limit
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 20}
+        - name: role
+          in: query
+          schema: {type: string, enum: [TENANT_ADMINISTRATOR, OPERATIONAL_COLLABORATOR, MANAGER, ACCOUNTANT, ANALYST]}
+        - name: status
+          in: query
+          schema: {type: string, enum: [ACTIVE, INACTIVE, PENDING]}
+      responses:
+        "200":
+          description: One page of users
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountPage'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+    post:
+      summary: Register an internal user of the tenant
+      description: >
+        The Tenant Administrator registers a user of their own tenant with one role among TENANT_ADMINISTRATOR,
+        OPERATIONAL_COLLABORATOR, MANAGER, ACCOUNTANT and ANALYST (HU-SEC-005). The tenant is the tenantId of the token and
+        nothing in the body can change it; a field that is not in the contract is 400. The password the Administrator types
+        and its confirmation, which must match, follow the policy; the password is a temporary credential of 72 hours that
+        only allows choosing another, it is stored only as a hash and is never returned. The tenant must be ACTIVE. An
+        e-mail that already has an account in the tenant is 422 with the reason in details: an internal user, an inactive
+        internal user who can be reactivated, or a Final Customer account. An optional role (MANAGER, ACCOUNTANT, ANALYST) that the tenant has not enabled is 422 too (HU-SEC-006). A repeat with the same Idempotency-Key answers
+        200 with the user already created. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is
+        accepted: a collaborator, a customer, the Platform Administrator and a temporary or restricted token get 403.
+      operationId: createInternalUser
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateInternalUserRequest'
+      responses:
+        "201":
+          $ref: '#/components/responses/Account'
+        "200":
+          $ref: '#/components/responses/Account'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/users/{accountId}/inactivation:
+    post:
+      summary: Inactivate an internal user of the tenant
+      description: >
+        The Tenant Administrator inactivates an active user of their own tenant with a reason of 1 to 500 characters (HU-SEC-005,
+        AC4). In one transaction the account becomes INACTIVE, the sessions it had are cut, AccountSessionsRevoked is written
+        with the actor and the reason, and who, when and why are kept with the account. The person can no longer sign in nor
+        renew. The tenant and the actor are those of the token and nothing in the body can change them. Inactivating an
+        inactive user is 422 INVALID_STATUS_TRANSITION. The last active Tenant Administrator of the tenant cannot be
+        inactivated, not even by their own account: 422 BUSINESS_RULE_VIOLATION (AC6). A user of another tenant, a customer or
+        an id that does not exist is 404. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
+      operationId: inactivateInternalUser
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusChangeRequest'
+      responses:
+        "200":
+          description: The user as it is now, with the last change
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/users/{accountId}/reactivation:
+    post:
+      summary: Reactivate an internal user of the tenant
+      description: >
+        The Tenant Administrator gives back the access of an inactive user of their own tenant with a reason of 1 to 500
+        characters (HU-SEC-005, AC5). The same record is restored, with the same e-mail, role and identifier, and who, when and
+        why are kept. The credentials issued before the inactivation stay cut: the person signs in again. Reactivating an
+        active user is 422 INVALID_STATUS_TRANSITION; a user of another tenant, a customer or an id that does not exist is 404.
+        Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
+      operationId: reactivateInternalUser
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StatusChangeRequest'
+      responses:
+        "200":
+          description: The user as it is now, with the last change
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/users/{accountId}/temporary-credential:
+    post:
+      summary: Issue a new temporary credential to a user
+      description: >
+        Gives a user whose temporary credential expired before the first sign-in a new one of 72 hours, which invalidates any
+        earlier one (HU-SEC-005, AC7; PDR section 9, G15 and GAP-016). The issuer types the password and its confirmation under
+        the one policy; nothing is generated and the password is never returned. It can be issued only to an account that still
+        has a temporary credential, in force or expired: one that already chose its own password is 422 BUSINESS_RULE_VIOLATION
+        (that is the recovery of HU-SEC-004). Who may issue to whom: a Tenant Administrator, to any user of its own tenant except
+        the first Administrator; the Platform Administrator, to the first Administrator of any tenant and, when the tenant has
+        no active Tenant Administrator able to sign in, to any of its active Administrators; any other issuer is 422
+        BUSINESS_RULE_VIOLATION. A user of another tenant, a customer or an id that does not exist is 404 for a Tenant
+        Administrator. Who and when are kept with the account and AccountTemporaryCredentialIssued is written in the same
+        transaction, without the password. Only a token with the role TENANT_ADMINISTRATOR and a tenant, or PLATFORM_ADMINISTRATOR
+        and none, and no access mark, is accepted.
+      operationId: issueTemporaryCredential
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IssueTemporaryCredentialRequest'
+      responses:
+        "200":
+          description: The user as it is now, with the end of the new credential
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/users/{accountId}/permission-grant:
+    post:
+      summary: Assign a special permission to a user of the tenant
+      description: >
+        The Tenant Administrator assigns one of the four special permissions to a user of their own tenant (HU-SEC-006, AC2, AC3). It
+        reaches the credential from the next sign-in or refresh and cuts no session. A Tenant Administrator may receive only
+        CONSULT_SENSITIVE_DATA, also themselves, since the other three are theirs by profile (422 BUSINESS_RULE_VIOLATION); an
+        Operational Collaborator may receive any of the four; a Manager, an Accountant or an Analyst none (422
+        BUSINESS_RULE_VIOLATION). Assigning a permission the user already holds changes nothing and answers the same 200: no trace, no
+        event. A permission outside the four is 400. A user of another tenant, a customer or an id that does not exist is 404. Who
+        assigned it and when are kept and SpecialPermissionGranted is written in the same transaction. Only a token with the role
+        TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
+      operationId: grantSpecialPermission
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PermissionChangeRequest'
+      responses:
+        "200":
+          description: The user as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/users/{accountId}/permission-removal:
+    post:
+      summary: Remove a special permission from a user of the tenant
+      description: >
+        The Tenant Administrator removes a special permission from a user of their own tenant (HU-SEC-006, AC7). In one transaction the
+        permission stops being held, every session of the user is cut, and SpecialPermissionRevoked and AccountSessionsRevoked are
+        written with the actor. A permission of the Tenant Administrator's profile cannot be removed (422 BUSINESS_RULE_VIOLATION).
+        Removing a permission the user does not hold changes nothing and answers the same 200: no session is cut. A permission outside
+        the four is 400; another tenant's user, a customer or an unknown id is 404. Only a token with the role TENANT_ADMINISTRATOR, a
+        tenant and no access mark is accepted.
+      operationId: removeSpecialPermission
+      tags: [Users]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/AccountIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PermissionChangeRequest'
+      responses:
+        "200":
+          description: The user as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/optional-roles:
+    get:
+      summary: The optional roles of the tenant and whether each is enabled
+      description: >
+        Always the three optional roles (MANAGER, ACCOUNTANT, ANALYST), in that order, with whether the tenant of the token enabled each
+        and who changed it and when (HU-SEC-006, AC5). A tenant starts with none enabled, except that one which already had users with a role
+        before HU-SEC-006 starts with that role enabled. Not paginated: the set is closed and the
+        route takes no parameter. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
+      operationId: listOptionalRoles
+      tags: [OptionalRoles]
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: The three optional roles of the tenant
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptionalRoleList'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/optional-roles/{role}/enablement:
+    post:
+      summary: Enable an optional role for the tenant
+      description: >
+        The Tenant Administrator enables MANAGER, ACCOUNTANT or ANALYST for their tenant (HU-SEC-006, AC5): from then on a user can be
+        registered with it. Enabling an enabled role is 422 INVALID_STATUS_TRANSITION; another role is 400. Who enabled it and when are
+        kept and OptionalRoleEnabled is written in the same transaction. The route reads no body. Only a token with the role
+        TENANT_ADMINISTRATOR, a tenant and no access mark is accepted.
+      operationId: enableOptionalRole
+      tags: [OptionalRoles]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalRolePath'
+      responses:
+        "200":
+          description: The optional role as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptionalRoleState'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/optional-roles/{role}/disablement:
+    post:
+      summary: Disable an optional role for the tenant
+      description: >
+        The Tenant Administrator disables an optional role of their tenant (HU-SEC-006, AC5). It is refused while an active user of the
+        tenant holds it (422 BUSINESS_RULE_VIOLATION): no operation takes a role away from a person. Disabling a disabled role is 422
+        INVALID_STATUS_TRANSITION; another role is 400. Who disabled it and when are kept and OptionalRoleDisabled is written in the
+        same transaction. The route reads no body. Only a token with the role TENANT_ADMINISTRATOR, a tenant and no access mark is
+        accepted.
+      operationId: disableOptionalRole
+      tags: [OptionalRoles]
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/OptionalRolePath'
+      responses:
+        "200":
+          description: The optional role as it is now
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptionalRoleState'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
           $ref: '#/components/responses/Error'
         "422":
           $ref: '#/components/responses/Error'
@@ -438,6 +1276,270 @@ paths:
           $ref: '#/components/responses/Error'
         "500":
           $ref: '#/components/responses/Error'
+  /api/v1/security/public/tenants/{identifier}/email-verifications:
+    post:
+      summary: Ask for a new e-mail verification link
+      description: >
+        A person gives the e-mail of their account in the tenant of the link /t/{identifier}. The answer is always 202
+        with no body when the request is well formed, whether the account exists, is pending, is already verified, has
+        already received three links in the last hour, or the tenant is not active, so the route tells nobody which
+        e-mails have an account (HU-SEC-003, RN-SEC-004-06). The work is done after the answer: a link is sent only to
+        a PENDING account of an active tenant that received fewer than three links in the last hour, and it retires
+        every earlier link of the account. It takes no Idempotency-Key. A malformed body, or an e-mail that cannot be
+        one, is 400. The design contract also lists 500; this service never answers it here, because nothing is done
+        before the answer.
+      operationId: requestEmailVerification
+      tags: [Accounts]
+      security: []
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          description: Identifier of the tenant, lowercase kebab-case
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 40
+            pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailVerificationRequest'
+      responses:
+        "202":
+          description: Accepted; a link is sent only when the rules allow it
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/public/tenants/{identifier}/email-verifications/confirmations:
+    post:
+      summary: Verify the e-mail with the link and the password
+      description: >
+        The page behind the link posts the value of the link (it travels after the hash in the e-mail, so it is never in
+        a server log) together with the password of the account (HU-SEC-003, R-1: whoever registered another
+        person's e-mail cannot activate it). On success the account becomes ACTIVE with emailVerified true, the link
+        stops working and AccountEmailVerified waits in the outbox. A link that is used, expired, replaced by a newer
+        one, unknown, of an account of another tenant or of a tenant that is not active is one 422
+        (BUSINESS_RULE_VIOLATION). A valid link with a wrong password is 401, leaves the account pending and counts a
+        failure toward the block of five in fifteen minutes; a blocked account is the same 401. An unknown identifier
+        is 404.
+      operationId: confirmEmailVerification
+      tags: [Accounts]
+      security: []
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          description: Identifier of the tenant, lowercase kebab-case
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 40
+            pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EmailVerificationConfirmation'
+      responses:
+        "204":
+          description: The account is verified and active
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/public/tenants/{identifier}/password-recoveries:
+    post:
+      summary: Ask for a password recovery code
+      description: >
+        A person gives the e-mail of their account in the tenant of the link /t/{identifier}; an unknown identifier is 202 too. The answer is always 202 with no body when the request is
+        well formed, whether the account exists, is inactive, belongs to another tenant, already received three codes in
+        the last hour, or the tenant is not active, so the route tells nobody which e-mails have an account (HU-SEC-004,
+        RN-SEC-006-01). The work is done after the answer: a code of eight digits is sent only to an ACTIVE or PENDING
+        account of an active tenant that received fewer than three codes in the last hour; it lasts 30 minutes, works
+        once and retires every earlier code of the account. It takes no Idempotency-Key. A malformed body, or an e-mail
+        that cannot be one, is 400. The design contract also lists 500; this service never answers it here, because
+        nothing is done before the answer.
+      operationId: requestPasswordRecovery
+      tags: [Accounts]
+      security: []
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          description: Identifier of the tenant, lowercase kebab-case
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 40
+            pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordRecoveryRequest'
+      responses:
+        "202":
+          description: Accepted; a code is sent only when the rules allow it
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/public/tenants/{identifier}/password-recoveries/resets:
+    post:
+      summary: Reset the password with the code
+      description: >
+        Takes the e-mail, the code of eight digits, the new password and its confirmation (HU-SEC-004). The shape is
+        judged first, so a password that breaks the policy or a confirmation that differs is 400 with its field and burns
+        no try of the code. Every refused code (wrong, used, expired, retired, an e-mail with no account, an inactive
+        account, an account of another tenant) is one 422 BUSINESS_RULE_VIOLATION with the same message; five wrong tries
+        retire the code. On success the password is replaced, the block of failed sign-ins is lifted, every session of the
+        account ends and the facts are written. No answer carries a password or the code.
+      operationId: resetPassword
+      tags: [Accounts]
+      security: []
+      parameters:
+        - name: identifier
+          in: path
+          required: true
+          description: Identifier of the tenant, lowercase kebab-case
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 40
+            pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        "204":
+          description: The password is replaced and every session of the account ended
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "404":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/public/platform/password-recoveries:
+    post:
+      summary: Ask for a password recovery code (Platform Administrator)
+      description: >
+        A person gives the e-mail of their account at /platform: the account that has no tenant. The answer is always 202 with no body when the request is
+        well formed, whether the account exists, is inactive, belongs to another tenant, already received three codes in
+        the last hour, or the tenant is not active, so the route tells nobody which e-mails have an account (HU-SEC-004,
+        RN-SEC-006-01). The work is done after the answer: a code of eight digits is sent only to an ACTIVE or PENDING
+        account of an active tenant that received fewer than three codes in the last hour; it lasts 30 minutes, works
+        once and retires every earlier code of the account. It takes no Idempotency-Key. A malformed body, or an e-mail
+        that cannot be one, is 400. The design contract also lists 500; this service never answers it here, because
+        nothing is done before the answer.
+      operationId: requestPlatformPasswordRecovery
+      tags: [Accounts]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordRecoveryRequest'
+      responses:
+        "202":
+          description: Accepted; a code is sent only when the rules allow it
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+  /api/v1/security/public/platform/password-recoveries/resets:
+    post:
+      summary: Reset the password with the code (Platform Administrator)
+      description: >
+        Takes the e-mail, the code of eight digits, the new password and its confirmation (HU-SEC-004). The shape is
+        judged first, so a password that breaks the policy or a confirmation that differs is 400 with its field and burns
+        no try of the code. Every refused code (wrong, used, expired, retired, an e-mail with no account, an inactive
+        account, an account of another tenant) is one 422 BUSINESS_RULE_VIOLATION with the same message; five wrong tries
+        retire the code. On success the password is replaced, the block of failed sign-ins is lifted, every session of the
+        account ends and the facts are written. No answer carries a password or the code.
+      operationId: resetPlatformPassword
+      tags: [Accounts]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        "204":
+          description: The password is replaced and every session of the account ended
+          headers:
+            X-Correlation-Id:
+              $ref: '#/components/headers/CorrelationId'
+            Cache-Control:
+              $ref: '#/components/headers/NoStore'
+        "400":
+          $ref: '#/components/responses/Error'
+        "413":
+          $ref: '#/components/responses/Error'
+        "415":
+          $ref: '#/components/responses/Error'
+        "422":
+          $ref: '#/components/responses/Error'
+        "500":
+          $ref: '#/components/responses/Error'
 components:
   parameters:
     IdempotencyKey:
@@ -446,6 +1548,19 @@ components:
       required: true
       description: One value per intent, the same on every retry (8 to 128 characters)
       schema: {type: string, minLength: 8, maxLength: 128}
+    AccountIdPath:
+      name: accountId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    OptionalRolePath:
+      name: role
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/OptionalRole'
     EventIdPath:
       name: eventId
       in: path
@@ -539,6 +1654,14 @@ components:
       required: [email, password]
       additionalProperties: false
       properties:
+        context:
+          type: string
+          enum: [CUSTOMER, TEAM]
+          description: |
+            The side the person works from (HU-SEC-008). It matters only for an account that holds FINAL_CUSTOMER and an
+            internal role: the token then carries the roles of that side only, and with no context the customer side.
+            An account with one side gets that side whatever is asked. The renewals of the session keep it. Ignored at the
+            platform.
         email:
           type: string
           minLength: 3
@@ -556,6 +1679,46 @@ components:
           type: string
           minLength: 20
           maxLength: 256
+    PasswordRecoveryRequest:
+      type: object
+      required: [email]
+      additionalProperties: false
+      properties:
+        email: {type: string, minLength: 3, maxLength: 254}
+    PasswordResetRequest:
+      type: object
+      required: [email, code, newPassword, newPasswordConfirmation]
+      additionalProperties: false
+      properties:
+        email: {type: string, minLength: 3, maxLength: 254}
+        code:
+          type: string
+          description: The code of eight digits received by e-mail
+          pattern: '^[0-9]{8}$'
+        newPassword:
+          type: string
+          minLength: 8
+          maxLength: 72
+        newPasswordConfirmation:
+          type: string
+          minLength: 1
+          maxLength: 72
+    EmailVerificationRequest:
+      type: object
+      required: [email]
+      additionalProperties: false
+      properties:
+        email: {type: string, minLength: 3, maxLength: 254}
+    EmailVerificationConfirmation:
+      type: object
+      required: [token, password]
+      additionalProperties: false
+      properties:
+        token:
+          type: string
+          description: The value of the link, base64url without padding (32 random bytes)
+          pattern: '^[A-Za-z0-9_-]{43}$'
+        password: {type: string, minLength: 1, maxLength: 128}
     TenantEventEnvelope:
       type: object
       description: The envelope of ADR-004 D4 as job 7 delivers it; fields it does not name are tolerated
@@ -568,11 +1731,14 @@ components:
         aggregateId: {type: string, format: uuid}
         payload:
           type: object
-          description: The full new state of the tenant; the service reads identifier and tenantStatus
+          description: >
+            The full new state of the tenant; the service reads identifier, tenantStatus and commercialName, the visible
+            sender of the e-mails (cut to 100 characters; a name with a control character makes the envelope invalid)
           required: [identifier, tenantStatus]
           properties:
             tenantId: {type: string, format: uuid}
             identifier: {type: string, minLength: 3, maxLength: 40, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'}
+            commercialName: {type: string}
             tenantStatus: {type: string, enum: [PENDING, ACTIVE, INACTIVE, FAILED]}
         correlationId: {type: string}
         occurredAt: {type: string, format: date-time}
@@ -586,6 +1752,8 @@ components:
         eventVersion: {type: integer, minimum: 1}
         tenantId: {type: string, format: uuid, description: Absent for the events of the Platform Administrator}
         aggregateId: {type: string, format: uuid}
+        actorId: {type: string, format: uuid, description: 'The account that caused the event, absent when nobody did'}
+        reason: {type: string, description: 'Why it happened, when the event has one'}
         payload: {type: object}
         correlationId: {type: string}
         occurredAt: {type: string, format: date-time}
@@ -640,6 +1808,18 @@ components:
         phone: {type: string, pattern: '^[0-9+() -]{7,20}$'}
         password: {type: string, minLength: 8, maxLength: 72, description: "At most 72 bytes, which the policy checks"}
         passwordConfirmation: {type: string, minLength: 1, maxLength: 72, description: Must match password}
+    CreateInternalUserRequest:
+      type: object
+      required: [fullName, email, role, password, passwordConfirmation]
+      additionalProperties: false
+      properties:
+        fullName: {type: string, minLength: 1, maxLength: 100}
+        email: {type: string, minLength: 3, maxLength: 254}
+        role:
+          type: string
+          enum: [TENANT_ADMINISTRATOR, OPERATIONAL_COLLABORATOR, MANAGER, ACCOUNTANT, ANALYST]
+        password: {type: string, minLength: 8, maxLength: 72, description: "The temporary credential; at most 72 bytes, which the policy checks"}
+        passwordConfirmation: {type: string, minLength: 1, maxLength: 72, description: Must match password}
     CreateFirstAdministratorRequest:
       type: object
       description: The password was already confirmed on the onboarding screen, so there is no confirmation here
@@ -652,7 +1832,7 @@ components:
     AccountResponse:
       type: object
       description: An account of a tenant. Never carries a password, a hash or any credential.
-      required: [accountId, tenantId, email, roles, accountStatus, emailVerified, createdAt]
+      required: [accountId, tenantId, email, roles, permissions, accountStatus, emailVerified, createdAt]
       properties:
         accountId: {type: string, format: uuid}
         tenantId: {type: string, format: uuid}
@@ -664,10 +1844,190 @@ components:
           items:
             type: string
             enum: [FINAL_CUSTOMER, TENANT_ADMINISTRATOR, OPERATIONAL_COLLABORATOR, MANAGER, ACCOUNTANT, ANALYST]
-        accountStatus: {type: string, enum: [ACTIVE, INACTIVE]}
+        accountStatus: {type: string, enum: [PENDING, ACTIVE, INACTIVE]}
         emailVerified: {type: boolean}
         temporaryCredentialUntil: {type: string, format: date-time, description: Present while a temporary credential is in force}
         createdAt: {type: string, format: date-time}
+        statusChangedAt: {type: string, format: date-time, description: When the status last changed; absent if it never did}
+        statusChangedBy: {type: string, description: "The actor of the last change, as tenant-administrator/<accountId>"}
+        statusReason: {type: string, description: Why the status last changed}
+        permissions:
+          type: array
+          description: The special permissions the user holds, as the credential carries them (HU-SEC-006)
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/SpecialPermission'
+    IssueTemporaryCredentialRequest:
+      type: object
+      required: [password, passwordConfirmation]
+      additionalProperties: false
+      properties:
+        password:
+          type: string
+          minLength: 8
+          maxLength: 72
+          description: The temporary credential; at most 72 bytes, which the password policy checks
+        passwordConfirmation:
+          type: string
+          minLength: 1
+          maxLength: 72
+          description: Must match password
+    SpecialPermission:
+      type: string
+      description: The four special permissions of Phase 1 (PDR section 9); no other exists and none can be created
+      enum: [VALIDATE_PAYMENT_PROOFS, MANAGE_CASH, MANAGE_DEPARTURE_EXECUTION, CONSULT_SENSITIVE_DATA]
+    PermissionChangeRequest:
+      type: object
+      required: [permission]
+      additionalProperties: false
+      properties:
+        permission:
+          $ref: '#/components/schemas/SpecialPermission'
+    OptionalRole:
+      type: string
+      description: The roles a tenant may enable (PDR section 9)
+      enum: [MANAGER, ACCOUNTANT, ANALYST]
+    OptionalRoleState:
+      type: object
+      required: [role, enabled]
+      properties:
+        role:
+          $ref: '#/components/schemas/OptionalRole'
+        enabled:
+          type: boolean
+        changedAt: {type: string, format: date-time, description: When the role last changed; absent if it never did}
+        changedBy: {type: string, description: "The actor of the last change, as tenant-administrator/<accountId>; absent if it never changed"}
+    OptionalRoleList:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            $ref: '#/components/schemas/OptionalRoleState'
+    StatusChangeRequest:
+      type: object
+      required: [reason]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Why the access is cut or given back; kept with the account
+    SupportArea:
+      type: string
+      description: The areas a support access may read, read only; the sensitive data are never among them
+      enum: [RESERVATIONS, CATALOG, OPERATIONS, CASH, CUSTOMERS]
+    SupportAccessStatus:
+      type: string
+      enum: [PENDING, APPROVED, REJECTED, EXPIRED, CLOSED]
+    CreateSupportAccessRequest:
+      type: object
+      required: [tenantId, reason, areas, hours]
+      additionalProperties: false
+      properties:
+        tenantId: {type: string, format: uuid}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        areas:
+          type: array
+          minItems: 1
+          maxItems: 5
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/SupportArea'
+        hours: {type: integer, minimum: 1, maximum: 24}
+    CreateEmergencyAccessRequest:
+      type: object
+      required: [tenantId, reason, statement, areas, hours]
+      additionalProperties: false
+      properties:
+        tenantId: {type: string, format: uuid}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        statement: {type: string, minLength: 1, maxLength: 500, description: Why the authorization of a Tenant Administrator could not be obtained}
+        areas:
+          type: array
+          minItems: 1
+          maxItems: 5
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/SupportArea'
+        hours: {type: integer, minimum: 1, maximum: 24}
+        sensitive: {type: boolean, description: Whether the access reaches the sensitive data; it needs sensitiveReason}
+        sensitiveReason: {type: string, minLength: 1, maxLength: 500, description: The specific justification for the sensitive data}
+    SupportAccessToken:
+      type: object
+      required: [accessToken, tokenType, expiresIn, expiresAt, scope, authorizationId]
+      properties:
+        accessToken: {type: string}
+        tokenType: {type: string, enum: [Bearer]}
+        expiresIn: {type: integer, description: Seconds until the access ends}
+        expiresAt: {type: string, format: date-time}
+        scope:
+          type: array
+          items: {type: string, enum: [RESERVATIONS, CATALOG, OPERATIONS, CASH, CUSTOMERS, SENSITIVE]}
+        authorizationId: {type: string, format: uuid}
+    SupportAccess:
+      type: object
+      required: [supportAccessId, tenantId, status, reason, areas, hours, requestedBy, requestedAt]
+      properties:
+        supportAccessId: {type: string, format: uuid}
+        tenantId: {type: string, format: uuid}
+        status:
+          $ref: '#/components/schemas/SupportAccessStatus'
+        reason: {type: string}
+        areas:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupportArea'
+        hours: {type: integer}
+        requestedBy: {type: string, format: uuid}
+        requestedAt: {type: string, format: date-time}
+        decidedBy: {type: string, format: uuid}
+        decidedAt: {type: string, format: date-time}
+        decisionReason: {type: string}
+        expiresAt: {type: string, format: date-time}
+        openedAt: {type: string, format: date-time}
+        closedAt: {type: string, format: date-time}
+        closedReason: {type: string}
+        basis: {type: string, enum: [TENANT_AUTHORIZATION, EMERGENCY]}
+        statement: {type: string, description: Only in an emergency access}
+        sensitive: {type: boolean}
+        sensitiveReason: {type: string}
+    SupportAccessPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SupportAccess'
+        meta:
+          type: object
+          required: [page, limit, total, totalPages]
+          properties:
+            page: {type: integer, minimum: 1}
+            limit: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, minimum: 0}
+            totalPages: {type: integer, minimum: 0}
+    AccountPage:
+      type: object
+      required: [data, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountResponse'
+        meta:
+          type: object
+          required: [page, limit, total, totalPages]
+          properties:
+            page: {type: integer, minimum: 1}
+            limit: {type: integer, minimum: 1, maximum: 100}
+            total: {type: integer, minimum: 0}
+            totalPages: {type: integer, minimum: 0}
     SessionResponse:
       type: object
       description: >
@@ -692,7 +2052,7 @@ components:
       properties:
         error:
           type: string
-          enum: [VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, BUSINESS_RULE_VIOLATION, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, SERVICE_UNAVAILABLE, INTERNAL_ERROR]
+          enum: [VALIDATION_ERROR, UNAUTHORIZED, FORBIDDEN, NOT_FOUND, INVALID_STATUS_TRANSITION, BUSINESS_RULE_VIOLATION, PAYLOAD_TOO_LARGE, UNSUPPORTED_MEDIA_TYPE, SERVICE_UNAVAILABLE, INTERNAL_ERROR]
         message:
           type: string
         details:

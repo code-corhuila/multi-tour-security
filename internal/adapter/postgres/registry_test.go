@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -228,6 +229,9 @@ func TestI_NoSecretIsStoredInClear(t *testing.T) {
 
 func TestI_ATemporaryCredentialStoresItsExpiry(t *testing.T) {
 	registry, pool := registrySetup(t)
+	if _, err := postgres.NewOptionalRoles(pool).Enable(ctx, roleChange(tenant, "MANAGER")); err != nil {
+		t.Fatal(err)
+	}
 	n := newAccount("user@example.com")
 	n.Role, n.CreatedBy = "MANAGER", "tenant-administrator/abc"
 	n.TemporaryUntil = time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
@@ -238,5 +242,23 @@ func TestI_ATemporaryCredentialStoresItsExpiry(t *testing.T) {
 	read, found, err := postgres.NewAccounts(pool).FindByID(ctx, got.Account.ID)
 	if err != nil || !found || !read.TemporaryUntil.Equal(n.TemporaryUntil) {
 		t.Fatalf("the expiry was not stored: %+v %v %v", read, found, err)
+	}
+}
+
+// HU-SEC-006: the replay of a registration answers the user as the list shows it, with the permissions they hold now.
+func TestI_FindKeyShowsThePermissionsTheUserHoldsNowSoARepeatAgreesWithTheList(t *testing.T) {
+	registry, pool := registrySetup(t)
+	n := newAccount("colab@example.com")
+	n.Role = "OPERATIONAL_COLLABORATOR"
+	made, err := registry.Create(ctx, n, "user:"+tenant, "key-0001-abcd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := postgres.NewUserPermissions(pool).Grant(ctx, permChange(made.Account.ID, "MANAGE_CASH")); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err := registry.FindKey(ctx, "user:"+tenant, "key-0001-abcd")
+	if err != nil || !found || !slices.Equal(got.Permissions, []string{"MANAGE_CASH"}) {
+		t.Fatalf("%v %v %v: the repeat must show what the user holds now", got.Permissions, found, err)
 	}
 }

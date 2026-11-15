@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/code-corhuila/multi-tour-security/internal/core/account"
 	"github.com/code-corhuila/multi-tour-security/internal/core/outbox"
 )
 
@@ -26,7 +27,7 @@ func WithOutbox(service OutboxService) Option {
 	return func(s *server) { s.outbox = service }
 }
 
-const serviceRole = "SERVICE"
+const serviceRole = account.RoleService
 
 // requireService lets in the token of a service and nothing else: the role SERVICE alone, no tenant and no access mark.
 // Any other valid token, a person's included, is FORBIDDEN, and the gateway does not route these paths at all.
@@ -47,6 +48,8 @@ type eventBody struct {
 	EventVersion  int             `json:"eventVersion"`
 	TenantID      string          `json:"tenantId,omitempty"`
 	AggregateID   string          `json:"aggregateId"`
+	ActorID       string          `json:"actorId,omitempty"`
+	Reason        string          `json:"reason,omitempty"`
 	Payload       json.RawMessage `json:"payload"`
 	CorrelationID string          `json:"correlationId"`
 	OccurredAt    string          `json:"occurredAt"`
@@ -59,7 +62,7 @@ type eventBody struct {
 
 func eventOf(e outbox.Event) eventBody {
 	body := eventBody{
-		EventID: e.ID, EventType: e.Type, EventVersion: e.Version, TenantID: e.TenantID, AggregateID: e.AggregateID, Payload: e.Payload,
+		EventID: e.ID, EventType: e.Type, EventVersion: e.Version, TenantID: e.TenantID, AggregateID: e.AggregateID, ActorID: e.ActorID, Reason: e.Reason, Payload: e.Payload,
 		CorrelationID: e.CorrelationID, OccurredAt: e.OccurredAt.UTC().Format(time.RFC3339Nano), Status: string(e.Status),
 		Attempts: e.Attempts, LastError: e.LastError, NextAttemptAt: e.NextAttemptAt.UTC().Format(time.RFC3339Nano),
 	}

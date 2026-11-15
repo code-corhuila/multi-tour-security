@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -81,6 +80,12 @@ type accountBody struct {
 	// TemporaryCredentialUntil is the end of a temporary credential, never the credential; absent for an ordinary one.
 	TemporaryCredentialUntil *time.Time `json:"temporaryCredentialUntil,omitempty"`
 	CreatedAt                time.Time  `json:"createdAt"`
+	// the last change of status: who, when and why; absent for an account that never changed
+	StatusChangedAt *time.Time `json:"statusChangedAt,omitempty"`
+	StatusChangedBy string     `json:"statusChangedBy,omitempty"`
+	StatusReason    string     `json:"statusReason,omitempty"`
+	// Permissions is the whole set the credential of the person carries (HU-SEC-006): always present, maybe empty
+	Permissions []string `json:"permissions"`
 }
 
 // answerAccount is the only place where the answer of the use case that makes accounts becomes HTTP: 201 for a new
@@ -88,26 +93,30 @@ type accountBody struct {
 // goes to the log with the trace id and never to the caller.
 func (s *server) answerAccount(w http.ResponseWriter, r *http.Request, reg port.Registered, created bool, err error) {
 	var invalid *createaccount.FieldError
+	var taken *createaccount.EmailTakenError
 	var out accountBody
 	if err == nil {
 		out, err = toAccountBody(reg)
 	}
 	switch {
 	case errors.As(err, &invalid):
-		writeEnvelope(w, r, http.StatusBadRequest, errorBody{Error: "VALIDATION_ERROR", Message: "the request is not valid",
-			Details: []fieldDetail{{Field: invalid.Field, Message: invalid.Err.Error()}}})
+		refuseField(w, r, invalid)
 	case errors.Is(err, createaccount.ErrTenantNotFound):
 		writeError(w, r, http.StatusNotFound, "NOT_FOUND", "the tenant does not exist")
 	case errors.Is(err, createaccount.ErrTenantNotActive):
 		writeError(w, r, http.StatusUnprocessableEntity, "BUSINESS_RULE_VIOLATION", "the tenant is not active")
+	case errors.As(err, &taken):
+		// only the registration of a user is told whose the e-mail is (the use case decides who is told)
+		writeEnvelope(w, r, http.StatusUnprocessableEntity, errorBody{Error: "BUSINESS_RULE_VIOLATION",
+			Message: "the e-mail is already in use in this tenant", Details: []fieldDetail{{Field: "email", Message: takenMessage(taken.Reason)}}})
+	case errors.Is(err, port.ErrRoleNotEnabled):
+		refuseRule(w, r, "the role is not enabled in this tenant")
 	case errors.Is(err, port.ErrEmailTaken):
 		// the details tell the portal a taken e-mail from an inactive tenant, whose 422 carries none
 		writeEnvelope(w, r, http.StatusUnprocessableEntity, errorBody{Error: "BUSINESS_RULE_VIOLATION",
 			Message: "the e-mail is already in use in this tenant", Details: []fieldDetail{{Field: "email", Message: "already in use"}}})
 	case err != nil:
-		// only the type: the text of a driver error can quote the e-mail of the row that failed
-		s.logger.ErrorContext(r.Context(), "creating an account failed", "traceId", traceID(r.Context()), "errorType", fmt.Sprintf("%T", err))
-		writeError(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "an internal error occurred")
+		s.fail(w, r, "creating an account", err)
 	default:
 		status := http.StatusOK
 		if created {
@@ -116,6 +125,7 @@ func (s *server) answerAccount(w http.ResponseWriter, r *http.Request, reg port.
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(status)
+		// the status line is already sent: an encoding error here can only be a client that went away, so there is nothing to answer
 		_ = json.NewEncoder(w).Encode(out)
 	}
 }
@@ -128,6 +138,8 @@ func toAccountBody(reg port.Registered) (accountBody, error) {
 		status = "ACTIVE"
 	case account.Inactive:
 		status = "INACTIVE"
+	case account.Pending:
+		status = "PENDING"
 	default:
 		return accountBody{}, errors.New("the account has a status the contract does not know")
 	}
@@ -136,10 +148,24 @@ func toAccountBody(reg port.Registered) (accountBody, error) {
 		u := reg.Account.TemporaryUntil.UTC()
 		until = &u
 	}
+	var changedAt *time.Time
+	if !reg.Changed.At.IsZero() {
+		c := reg.Changed.At.UTC()
+		changedAt = &c
+	}
 	return accountBody{
+		StatusChangedAt: changedAt, StatusChangedBy: reg.Changed.By, StatusReason: reg.Changed.Reason,
 		TemporaryCredentialUntil: until,
 		AccountID:                reg.Account.ID, TenantID: reg.Account.TenantID, FullName: reg.FullName, Email: reg.Account.EmailNormalized,
-		Phone: reg.Phone, Roles: []string{reg.Role}, AccountStatus: status, EmailVerified: reg.EmailVerified,
+		Phone: reg.Phone, Roles: rolesOf(reg), Permissions: account.PermissionsFor(rolesOf(reg), reg.Permissions), AccountStatus: status, EmailVerified: reg.EmailVerified,
 		CreatedAt: reg.CreatedAt.UTC(),
 	}, nil
+}
+
+// rolesOf is every role of the account; a store that names only one (Role) is answered with that one.
+func rolesOf(reg port.Registered) []string {
+	if len(reg.Roles) > 0 {
+		return reg.Roles
+	}
+	return []string{reg.Role}
 }

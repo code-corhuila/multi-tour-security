@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS security.idx_support_access_requested_by_requested_at;
+DROP INDEX IF EXISTS security.idx_support_access_tenant_status_requested_at;

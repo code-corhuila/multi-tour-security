@@ -82,9 +82,9 @@ func TestC_SignInReturnsATokenOfTheTenantOfTheLinkWithTheClaimsOfTheSpec(t *test
 		!c.ExpiresAt.Equal(now.Add(15*time.Minute)) {
 		t.Fatalf("iss, aud, iat, nbf and exp of the spec: %+v", c)
 	}
-	// the special permissions have no store yet (HU-SEC-005): the claim is an empty list, never missing
-	if c.Permissions == nil || len(c.Permissions) != 0 {
-		t.Fatalf("permissions must be an empty list for now: %#v", c.Permissions)
+	// the claim is the whole set of the person (HU-SEC-006): the three of an Administrator by profile, never missing
+	if !reflect.DeepEqual(c.Permissions, []string{"MANAGE_CASH", "MANAGE_DEPARTURE_EXECUTION", "VALIDATE_PAYMENT_PROOFS"}) {
+		t.Fatalf("the Administrator carries the three of the profile: %#v", c.Permissions)
 	}
 	if len(w.sessions.opened) != 1 || w.sessions.opened[0] != session.Hash(got.RefreshToken) || w.sessions.owners[0] != "acc-1" ||
 		!w.sessions.at[0].Equal(now) {
@@ -424,5 +424,50 @@ func TestC_AServiceWithoutOnePieceRefusesToWorkInsteadOfAnsweringWithoutIt(t *te
 				t.Errorf("without the %s the platform answered: %v", name, err)
 			}
 		}()
+	}
+}
+
+func TestA_APendingAccountWithItsPasswordIsToldToVerify(t *testing.T) {
+	w := newWorld()
+	w.add("acc-1", tenantID, "ana@example.com", []string{"FINAL_CUSTOMER"}, func(a *account.Account) { a.Status = account.Pending })
+	_, err := w.service.SignIn(ctx, request("travesia-natural", "ana@example.com", password))
+	if !errors.Is(err, signin.ErrEmailNotVerified) {
+		t.Fatalf("err = %v, want the refusal that asks to verify the e-mail", err)
+	}
+	if len(w.signer.claims) != 0 || len(w.sessions.opened) != 0 || len(w.accounts.successes) != 0 || len(w.accounts.failures) != 0 {
+		t.Fatal("a pending account gets no token, no session, no success and no failure")
+	}
+}
+
+func TestA_APendingAccountWithAWrongPasswordGetsTheGenericRefusalAndAFailure(t *testing.T) {
+	w := newWorld()
+	w.add("acc-1", tenantID, "ana@example.com", []string{"FINAL_CUSTOMER"}, func(a *account.Account) { a.Status = account.Pending })
+	_, err := w.service.SignIn(ctx, request("travesia-natural", "ana@example.com", "not the password"))
+	if !errors.Is(err, signin.ErrRefused) || errors.Is(err, signin.ErrEmailNotVerified) {
+		t.Fatalf("err = %v, want the generic refusal", err)
+	}
+	if len(w.accounts.failures) != 1 {
+		t.Fatalf("the wrong password must count as a failure: %v", w.accounts.failures)
+	}
+}
+
+func TestA_APendingAccountOfAnInactiveTenantIsRefusedGenerically(t *testing.T) {
+	w := newWorld()
+	w.add("acc-1", otherID, "ana@example.com", []string{"FINAL_CUSTOMER"}, func(a *account.Account) { a.Status = account.Pending })
+	_, err := w.service.SignIn(ctx, request("parked", "ana@example.com", password))
+	if !errors.Is(err, signin.ErrRefused) || errors.Is(err, signin.ErrEmailNotVerified) {
+		t.Fatalf("err = %v, want the generic refusal: an inactive tenant says nothing about its accounts", err)
+	}
+}
+
+func TestA_APendingAccountThatIsBlockedGetsTheGenericRefusal(t *testing.T) {
+	w := newWorld()
+	w.add("acc-1", tenantID, "ana@example.com", []string{"FINAL_CUSTOMER"}, func(a *account.Account) {
+		a.Status = account.Pending
+		a.BlockedUntil = now.Add(time.Minute)
+	})
+	_, err := w.service.SignIn(ctx, request("travesia-natural", "ana@example.com", password))
+	if !errors.Is(err, signin.ErrRefused) || errors.Is(err, signin.ErrEmailNotVerified) {
+		t.Fatalf("err = %v, want the generic refusal", err)
 	}
 }

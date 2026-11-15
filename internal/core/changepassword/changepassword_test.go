@@ -46,6 +46,9 @@ func (f *fakeAccounts) RecordFailure(context.Context, string, time.Time, string)
 }
 func (f *fakeAccounts) RecordSuccess(context.Context, string) error       { return nil }
 func (f *fakeAccounts) RolesOf(context.Context, string) ([]string, error) { return nil, nil }
+func (f *fakeAccounts) PermissionsOf(context.Context, string) ([]string, error) {
+	return nil, nil
+}
 func (f *fakeAccounts) ChangePassword(_ context.Context, id, hash string, at time.Time, correlation string) error {
 	if f.changeErr != nil {
 		return f.changeErr

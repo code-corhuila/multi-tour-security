@@ -14,6 +14,7 @@ import (
 	"github.com/code-corhuila/multi-tour-security/internal/core/session"
 	"github.com/code-corhuila/multi-tour-security/internal/core/tenant"
 	"github.com/code-corhuila/multi-tour-security/internal/core/token"
+	shared "github.com/code-corhuila/multi-tour-security/internal/core/validate"
 )
 
 var (
@@ -23,13 +24,12 @@ var (
 	// ErrInvalidRequest is an e-mail or a password that cannot be one; it is told apart because it says nothing about
 	// any account.
 	ErrInvalidRequest = errors.New("the e-mail or the password is not valid")
+	// ErrEmailNotVerified is a pending account that gave its right password: the only refusal that is not the generic one.
+	ErrEmailNotVerified = errors.New("the e-mail of the account is not verified")
 )
 
 const (
-	tenantAdministrator   = "TENANT_ADMINISTRATOR"
-	platformAdministrator = "PLATFORM_ADMINISTRATOR"
-	maxPassword           = 128
-	maxCorrelationID      = 128
+	maxPassword = 128
 )
 
 // Request is a sign-in. TenantIdentifier is the one of the link and is ignored at the platform.
@@ -37,7 +37,9 @@ type Request struct {
 	TenantIdentifier string
 	Email            string
 	Password         string
-	CorrelationID    string
+	// Context is the side the person works from, account.ContextCustomer or account.ContextTeam; empty asks for none.
+	Context       string
+	CorrelationID string
 }
 
 // Tokens is the answer. RefreshToken is empty for a temporary credential and for a restricted access: neither opens a
@@ -76,7 +78,7 @@ func (s *Service) signIn(ctx context.Context, r Request, platform bool) (Tokens,
 		return Tokens{}, errors.New("sign-in is not wired: every piece is needed, or the answers would tell the accounts apart")
 	}
 	email, ok := validate(r)
-	if !ok {
+	if !ok || (r.Context != "" && r.Context != account.ContextCustomer && r.Context != account.ContextTeam) {
 		return Tokens{}, ErrInvalidRequest
 	}
 	now := s.Clock()
@@ -116,17 +118,35 @@ func (s *Service) signIn(ctx context.Context, r Request, platform bool) (Tokens,
 		}
 		return Tokens{}, ErrRefused
 	}
-	if acct.CanAuthenticate(now) != nil {
+	if err := acct.CanAuthenticate(now); err != nil {
+		// the only refusal that is not the generic one, and only after the right password: a stranger learns nothing, and the
+		// person is told how to go on. A tenant that is not active says nothing about its accounts.
+		if errors.Is(err, account.ErrNotVerified) && !inactive {
+			return Tokens{}, ErrEmailNotVerified
+		}
 		return Tokens{}, ErrRefused
 	}
-	roles, err := s.Accounts.RolesOf(ctx, acct.ID)
+	held, err := s.Accounts.RolesOf(ctx, acct.ID)
 	if err != nil {
 		return Tokens{}, err
 	}
+	// the credential carries the roles of one side, so the permissions of the two are never mixed (HU-SEC-008)
+	side, roles := account.ForContext(held, r.Context)
 	// an account with no role would open nothing; the platform lets in only its Administrator and an inactive tenant
 	// only its own
-	if len(roles) == 0 || (platform && !slices.Contains(roles, platformAdministrator)) || (inactive && !slices.Contains(roles, tenantAdministrator)) {
+	if len(roles) == 0 || (platform && !slices.Contains(roles, account.RolePlatformAdministrator)) || (inactive && !slices.Contains(roles, account.RoleTenantAdministrator)) {
 		return Tokens{}, ErrRefused
+	}
+	// the token of a temporary credential carries no permission, so the store is not asked for it; any other carries the whole set of the
+	// person, read before the success is recorded so that a failure here clears nothing
+	temporary := acct.UsesTemporaryCredential(now)
+	var permissions []string
+	if !temporary {
+		assigned, err := s.Accounts.PermissionsOf(ctx, acct.ID)
+		if err != nil {
+			return Tokens{}, err
+		}
+		permissions = account.PermissionsFor(roles, assigned)
 	}
 	if err := s.Accounts.RecordSuccess(ctx, acct.ID); err != nil {
 		return Tokens{}, err
@@ -134,10 +154,10 @@ func (s *Service) signIn(ctx context.Context, r Request, platform bool) (Tokens,
 
 	var claims token.Claims
 	switch {
-	case acct.UsesTemporaryCredential(now):
+	case temporary:
 		claims = token.PasswordChange(acct, now)
 	default:
-		claims = token.Access(acct, roles, nil, inactive, now)
+		claims = token.Access(acct, roles, permissions, inactive, now)
 	}
 	access, err := s.Signer.Sign(claims)
 	if err != nil {
@@ -151,7 +171,7 @@ func (s *Service) signIn(ctx context.Context, r Request, platform bool) (Tokens,
 	if err != nil {
 		return Tokens{}, err
 	}
-	if _, err := s.Sessions.Open(ctx, acct.ID, valueHash, now); err != nil {
+	if _, err := s.Sessions.Open(ctx, acct.ID, valueHash, side, now); err != nil {
 		return Tokens{}, err
 	}
 	out.RefreshToken = value
@@ -167,7 +187,7 @@ func validate(r Request) (string, bool) {
 	}
 	// the correlation id is written with a failure and with the event of a block: one that cannot be stored must be
 	// refused for everyone, or the answer would tell which accounts exist
-	if len(r.CorrelationID) < 1 || len(r.CorrelationID) > maxCorrelationID {
+	if !shared.CorrelationID(r.CorrelationID) {
 		return "", false
 	}
 	// bcrypt reads 72 bytes at most: the password policy of HU-SEC-002 caps new passwords there, and a longer one

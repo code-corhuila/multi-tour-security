@@ -11,6 +11,12 @@ import (
 // ErrNotTemporary is a change of password on an account with no temporary credential in force.
 var ErrNotTemporary = errors.New("the account has no temporary credential in force")
 
+// RolesHeld lists the roles an account holds whatever their status, by name: a person whose team side is off still holds the internal role.
+// An e-mail that is already taken is judged by it (HU-SEC-008); the sign-in asks RolesOf, the roles that are active now.
+type RolesHeld interface {
+	RolesHeld(ctx context.Context, id string) ([]string, error)
+}
+
 // Accounts is where the accounts live. The tenant is empty for the Platform Administrator, and the e-mail arrives
 // normalized by account.NormalizeEmail: the store does not guess.
 type Accounts interface {
@@ -28,4 +34,7 @@ type Accounts interface {
 	ChangePassword(ctx context.Context, id, hash string, now time.Time, correlationID string) error
 	// RolesOf lists the roles of the active membership, by name; an account with none has an empty list.
 	RolesOf(ctx context.Context, id string) ([]string, error)
+	// PermissionsOf lists the special permissions assigned to the account and held now, by name, of its active membership; an account
+	// with none has an empty list. The ones of a profile are not here: account.PermissionsFor adds them (HU-SEC-006, plan D-05).
+	PermissionsOf(ctx context.Context, id string) ([]string, error)
 }

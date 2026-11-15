@@ -77,6 +77,10 @@ func tokenWith(t *testing.T, roles []string, tenantID, access string) string {
 	if access != "" {
 		claims["access"] = access
 	}
+	if access == "exceptional" {
+		// the token of a support access has the id of its authorization, or the verifier refuses it
+		claims["authorizationId"] = "22222222-2222-4222-8222-222222222222"
+	}
 	return sign(t, jwt.SigningMethodRS256, routeKey, claims)
 }
 
@@ -265,5 +269,27 @@ func TestC_WithoutTheUseCaseTheInternalRoutesDoNotExist(t *testing.T) {
 	rec := call(newHandler(newKey(t)), http.MethodGet, outboxRoute, serviceBearer(t), "", "", "")
 	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusNotFound {
 		t.Fatalf("got %d", rec.Code)
+	}
+}
+
+// ADR-004 D4: the envelope the relay reads carries who caused the event and why, so the audit can name the person (AC-IDA-09.2).
+func TestC_TheListCarriesTheActorAndTheReasonOfTheEnvelopeAndOmitsThemWhenThereAreNone(t *testing.T) {
+	with := sampleEvent()
+	with.ActorID, with.Reason = "0e109888-c9bb-4644-8211-c3dc18004847", "The check is over"
+	svc := &fakeOutbox{page: outbox.Page{Data: []outbox.Event{with, sampleEvent()}, Page: 1, Limit: 20, Total: 2, TotalPages: 1}}
+	rec := call(outboxHandler(svc, io.Discard), http.MethodGet, outboxRoute, serviceBearer(t), "", "", "")
+	var got struct {
+		Data []map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil || len(got.Data) != 2 {
+		t.Fatalf("%d %s %v", rec.Code, rec.Body, err)
+	}
+	if got.Data[0]["actorId"] != "0e109888-c9bb-4644-8211-c3dc18004847" || got.Data[0]["reason"] != "The check is over" {
+		t.Errorf("the envelope lost its actor or its reason: %v", got.Data[0])
+	}
+	for _, field := range []string{"actorId", "reason"} {
+		if _, has := got.Data[1][field]; has {
+			t.Errorf("an event without %s must not send it: %v", field, got.Data[1])
+		}
 	}
 }

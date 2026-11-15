@@ -1,0 +1,172 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/code-corhuila/multi-tour-security/internal/core/port"
+	"github.com/code-corhuila/multi-tour-security/internal/core/supportaccess"
+)
+
+var _ port.SupportAccesses = (*SupportAccesses)(nil)
+
+// SupportAccesses keeps the support accesses of the Platform Administrator in security.support_access (HU-SEC-007 part A, plan D-01).
+type SupportAccesses struct{ pool *pgxpool.Pool }
+
+// NewSupportAccesses expects a non-nil pool; the composition root owns it.
+func NewSupportAccesses(pool *pgxpool.Pool) *SupportAccesses { return &SupportAccesses{pool: pool} }
+
+// the columns of a request, in the order scanAccess reads them
+const supportColumns = `support_access_id::text, tenant_id::text, requested_by::text, reason, areas, hours, status, requested_at,
+	COALESCE(decided_by::text, ''), decided_at, COALESCE(decision_reason, ''), expires_at, opened_at, closed_at, COALESCE(closed_reason, ''),
+	basis, COALESCE(statement, ''), sensitive, COALESCE(sensitive_reason, '')`
+
+func scanAccess(row pgx.Row) (supportaccess.Access, error) {
+	var a supportaccess.Access
+	var areas []string
+	var status, basis string
+	var decidedAt, expiresAt, openedAt, closedAt *time.Time
+	err := row.Scan(&a.ID, &a.TenantID, &a.RequestedBy, &a.Reason, &areas, &a.Hours, &status, &a.RequestedAt,
+		&a.DecidedBy, &decidedAt, &a.DecisionReason, &expiresAt, &openedAt, &closedAt, &a.ClosedReason,
+		&basis, &a.Statement, &a.Sensitive, &a.SensitiveReason)
+	if err != nil {
+		return supportaccess.Access{}, err
+	}
+	if a.Areas, err = supportaccess.ParseAreas(areas); err != nil {
+		return supportaccess.Access{}, err
+	}
+	a.Status, a.Basis = supportaccess.Status(status), supportaccess.Basis(basis)
+	a.RequestedAt = a.RequestedAt.UTC()
+	a.DecidedAt, a.ExpiresAt, a.OpenedAt, a.ClosedAt = utc(decidedAt), utc(expiresAt), utc(openedAt), utc(closedAt)
+	return a, nil
+}
+
+// One statement: the request is stored, or the unique key of its author refuses it (conflict) and nothing is written. Two requests with
+// one key at once have one winner, because the second waits for the key and then finds it.
+const insertSupportAccess = `
+INSERT INTO security.support_access (tenant_id, requested_by, request_key, reason, areas, hours, status, requested_at)
+VALUES ($1::uuid, $2::uuid, $3, $4, $5::text[], $6, 'PENDING', $7::timestamptz)
+ON CONFLICT (requested_by, request_key) DO NOTHING
+RETURNING ` + supportColumns
+
+// Create stores the request, or returns the one the author's key already made.
+func (s *SupportAccesses) Create(ctx context.Context, a supportaccess.Access, key string) (supportaccess.Access, bool, error) {
+	made, err := scanAccess(s.pool.QueryRow(ctx, insertSupportAccess, a.TenantID, a.RequestedBy, key, a.Reason, a.AreaNames(), a.Hours, a.RequestedAt))
+	if err == nil {
+		return made, true, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return supportaccess.Access{}, false, err
+	}
+	prior, found, err := s.FindByKey(ctx, a.RequestedBy, key)
+	if err == nil && !found {
+		// the key was taken a moment ago and the row is gone: nothing can be answered for it
+		err = errors.New("the idempotency key was taken and cannot be read")
+	}
+	return prior, false, err
+}
+
+// FindByKey returns the request that the key of that author made.
+func (s *SupportAccesses) FindByKey(ctx context.Context, requestedBy, key string) (supportaccess.Access, bool, error) {
+	a, err := scanAccess(s.pool.QueryRow(ctx, `SELECT `+supportColumns+` FROM security.support_access WHERE requested_by = $1::uuid AND request_key = $2`, requestedBy, key))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return supportaccess.Access{}, false, nil
+	}
+	return a, err == nil, err
+}
+
+// ListByRequester is one query: the page and, in each row, the total of the filter. Only the rows of that author are read.
+func (s *SupportAccesses) ListByRequester(ctx context.Context, requestedBy, status string, limit, offset int) ([]supportaccess.Access, int, error) {
+	return s.listBy(ctx, "requested_by", requestedBy, status, limit, offset)
+}
+
+// ExpirePending marks the requests of that author that nobody decided within the window as expired. A request that was decided, or that is
+// already expired, is not touched, so asking twice changes nothing.
+func (s *SupportAccesses) ExpirePending(ctx context.Context, requestedBy string, now time.Time) error {
+	_, err := s.pool.Exec(ctx, `UPDATE security.support_access SET status = 'EXPIRED' WHERE requested_by = $3::uuid AND status = 'PENDING'
+		AND requested_at + make_interval(secs => $2::double precision) <= $1::timestamptz`,
+		now, supportaccess.DecisionWindow.Seconds(), requestedBy)
+	return err
+}
+
+// FindForTenant returns the request with that id when it concerns that tenant.
+func (s *SupportAccesses) FindForTenant(ctx context.Context, tenantID, id string) (supportaccess.Access, bool, error) {
+	a, err := scanAccess(s.pool.QueryRow(ctx, `SELECT `+supportColumns+` FROM security.support_access WHERE support_access_id = $1::uuid AND tenant_id = $2::uuid`, id, tenantID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return supportaccess.Access{}, false, nil
+	}
+	return a, err == nil, err
+}
+
+// ListByTenant is one query: the page and, in each row, the total of the filter. Only the rows of that tenant are read.
+func (s *SupportAccesses) ListByTenant(ctx context.Context, tenantID, status string, limit, offset int) ([]supportaccess.Access, int, error) {
+	return s.listBy(ctx, "tenant_id", tenantID, status, limit, offset)
+}
+
+// listBy serves both listings. The column is one of the two constants above, never a value of a request.
+func (s *SupportAccesses) listBy(ctx context.Context, column, owner, status string, limit, offset int) ([]supportaccess.Access, int, error) {
+	filter := column + ` = $1::uuid AND ($2 = '' OR status = $2)`
+	rows, err := s.pool.Query(ctx, `SELECT `+supportColumns+`, count(*) OVER () FROM security.support_access WHERE `+filter+
+		` ORDER BY requested_at DESC, support_access_id DESC LIMIT $3 OFFSET $4`, owner, status, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	list, total := []supportaccess.Access{}, 0
+	for rows.Next() {
+		var count int
+		a, err := scanAccess(withCount{rows, &count})
+		if err != nil {
+			return nil, 0, err
+		}
+		list, total = append(list, a), count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if len(list) == 0 && offset > 0 {
+		// a page past the end has no row to carry the total, and the caller still needs it
+		if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM security.support_access WHERE `+filter, owner, status).Scan(&total); err != nil {
+			return nil, 0, err
+		}
+	}
+	return list, total, nil
+}
+
+// withCount reads the columns of a request and then the trailing count of the window, so one scanner serves the two listings.
+type withCount struct {
+	rows  pgx.Rows
+	count *int
+}
+
+func (w withCount) Scan(dest ...any) error { return w.rows.Scan(append(dest, w.count)...) }
+
+// ExpirePendingOfTenant marks the requests of that tenant that nobody decided within the window as expired.
+func (s *SupportAccesses) ExpirePendingOfTenant(ctx context.Context, tenantID string, now time.Time) error {
+	_, err := s.pool.Exec(ctx, `UPDATE security.support_access SET status = 'EXPIRED' WHERE tenant_id = $3::uuid AND status = 'PENDING'
+		AND requested_at + make_interval(secs => $2::double precision) <= $1::timestamptz`,
+		now, supportaccess.DecisionWindow.Seconds(), tenantID)
+	return err
+}
+
+// Decide stores the decision only while the request is pending and within its window, in one statement, so two decisions at once have one winner
+// (the second waits for the row, finds it decided and writes nothing).
+func (s *SupportAccesses) Decide(ctx context.Context, a supportaccess.Access) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `UPDATE security.support_access SET status = $3, decided_by = $4::uuid, decided_at = $5::timestamptz,
+			decision_reason = NULLIF($6, ''), expires_at = $7::timestamptz
+		WHERE support_access_id = $1::uuid AND tenant_id = $2::uuid AND status = 'PENDING'
+		  AND requested_at + make_interval(secs => $8::double precision) > $5::timestamptz`,
+		a.ID, a.TenantID, string(a.Status), a.DecidedBy, a.DecidedAt, a.DecisionReason, zeroToNil(a.ExpiresAt), supportaccess.DecisionWindow.Seconds())
+	return tag.RowsAffected() == 1, err
+}
+
+func zeroToNil(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}

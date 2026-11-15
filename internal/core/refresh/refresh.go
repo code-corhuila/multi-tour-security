@@ -16,9 +16,8 @@ import (
 )
 
 const (
-	platformAdministrator = "PLATFORM_ADMINISTRATOR"
-	minValue              = 20
-	maxValue              = 256
+	minValue = 20
+	maxValue = 256
 )
 
 // Service holds the pieces of the use case; the composition root fills every one, and a missing one stops it.
@@ -65,10 +64,12 @@ func (s *Service) Renew(ctx context.Context, value string) (signin.Tokens, error
 	if !found || acct.Status == account.Inactive || acct.UsesTemporaryCredential(now) {
 		return signin.Tokens{}, signin.ErrRefused
 	}
-	roles, err := s.Accounts.RolesOf(ctx, acct.ID)
+	held, err := s.Accounts.RolesOf(ctx, acct.ID)
 	if err != nil {
 		return signin.Tokens{}, err
 	}
+	// the side of the sign-in, never a wider one (HU-SEC-008)
+	_, roles := account.ForContext(held, renewed.Context)
 	if len(roles) == 0 {
 		return signin.Tokens{}, signin.ErrRefused
 	}
@@ -80,7 +81,11 @@ func (s *Service) Renew(ctx context.Context, value string) (signin.Tokens, error
 		return signin.Tokens{}, signin.ErrRefused
 	}
 
-	claims := token.Access(acct, roles, nil, false, now)
+	assigned, err := s.Accounts.PermissionsOf(ctx, acct.ID)
+	if err != nil {
+		return signin.Tokens{}, err
+	}
+	claims := token.Access(acct, roles, account.PermissionsFor(roles, assigned), false, now)
 	access, err := s.Signer.Sign(claims)
 	if err != nil {
 		return signin.Tokens{}, err
@@ -93,9 +98,9 @@ func (s *Service) Renew(ctx context.Context, value string) (signin.Tokens, error
 // access, which is never renewed.
 func (s *Service) placeIsOpen(ctx context.Context, acct account.Account, roles []string) (bool, error) {
 	if acct.IsPlatform() {
-		return slices.Contains(roles, platformAdministrator), nil
+		return slices.Contains(roles, account.RolePlatformAdministrator), nil
 	}
-	if slices.Contains(roles, platformAdministrator) {
+	if slices.Contains(roles, account.RolePlatformAdministrator) {
 		return false, nil // the platform role never mixes with a tenant (the same rule as the services apply)
 	}
 	c, found, err := s.Tenants.FindByID(ctx, acct.TenantID)

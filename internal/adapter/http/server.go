@@ -7,17 +7,20 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
 	"strings"
+
+	"github.com/code-corhuila/multi-tour-security/internal/core/validate"
 )
 
 const correlationHeader = "X-Correlation-Id"
 
-// A correlation id is reused only when it is short and made of safe characters, so a caller
+// A correlation id is reused only when it is short (the length the outbox takes) and made of safe characters, so a caller
 // cannot inject anything into the logs.
-var validCorrelationID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
+var validCorrelationID = regexp.MustCompile(fmt.Sprintf(`^[A-Za-z0-9._-]{1,%d}$`, validate.MaxCorrelationID))
 
 type contextKey struct{}
 
@@ -75,6 +78,59 @@ func New(verifier TokenVerifier, logger *slog.Logger, options ...Option) http.Ha
 		// public by design: a person who has no account has no token
 		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/accounts", s.createCustomerAccount)
 	}
+	if s.internalUsers != nil {
+		mux.Handle("POST /api/v1/security/users", s.protect(s.requireTenantAdministrator(http.HandlerFunc(s.createInternalUser))))
+	}
+	if s.userLister != nil {
+		mux.Handle("GET /api/v1/security/users", s.protect(s.requireTenantAdministrator(http.HandlerFunc(s.listInternalUsers))))
+	}
+	if s.emergencyAccess != nil {
+		mux.Handle("POST /api/v1/security/platform-emergency-accesses", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.openEmergencyAccess))))
+	}
+	if s.supportRequests != nil {
+		mux.Handle("POST /api/v1/security/platform-support-accesses", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.askForSupportAccess))))
+		mux.Handle("GET /api/v1/security/platform-support-accesses", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.listPlatformSupportAccesses))))
+	}
+	if s.supportSessions != nil {
+		mux.Handle("POST /api/v1/security/platform-support-accesses/{supportAccessId}/token", s.protect(s.requirePlatformAdministrator(http.HandlerFunc(s.takeSupportAccessToken))))
+		mux.Handle("POST /api/v1/security/platform-support-accesses/{supportAccessId}/closure", s.protect(s.requirePlatformAdministratorOrItsAccess(http.HandlerFunc(s.closeSupportAccess))))
+	}
+	if s.supportDecisions != nil {
+		guard := func(next http.Handler) http.Handler { return s.protect(s.requireTenantAdministratorOrRestricted(next)) }
+		mux.Handle("GET /api/v1/security/support-accesses", guard(http.HandlerFunc(s.listSupportAccesses)))
+		mux.Handle("POST /api/v1/security/support-accesses/{supportAccessId}/approval", guard(s.decideSupportAccess(s.supportDecisions.Approve, false, "approving a support access")))
+		mux.Handle("POST /api/v1/security/support-accesses/{supportAccessId}/rejection", guard(s.decideSupportAccess(s.supportDecisions.Reject, true, "rejecting a support access")))
+	}
+	if s.permissions != nil {
+		mux.Handle("POST /api/v1/security/users/{accountId}/permission-grant", s.protect(s.requireTenantAdministrator(s.changePermission(s.permissions.Grant))))
+		mux.Handle("POST /api/v1/security/users/{accountId}/permission-removal", s.protect(s.requireTenantAdministrator(s.changePermission(s.permissions.Remove))))
+	}
+	if s.optionalRoles != nil {
+		mux.Handle("GET /api/v1/security/optional-roles", s.protect(s.requireTenantAdministrator(http.HandlerFunc(s.listOptionalRoles))))
+		mux.Handle("POST /api/v1/security/optional-roles/{role}/enablement", s.protect(s.requireTenantAdministrator(s.changeOptionalRole(s.optionalRoles.Enable, "enabling an optional role"))))
+		mux.Handle("POST /api/v1/security/optional-roles/{role}/disablement", s.protect(s.requireTenantAdministrator(s.changeOptionalRole(s.optionalRoles.Disable, "disabling an optional role"))))
+	}
+	if s.userStatus != nil {
+		mux.Handle("POST /api/v1/security/users/{accountId}/inactivation", s.protect(s.requireTenantAdministrator(s.changeStatus(s.userStatus.Inactivate))))
+		mux.Handle("POST /api/v1/security/users/{accountId}/reactivation", s.protect(s.requireTenantAdministrator(s.changeStatus(s.userStatus.Reactivate))))
+	}
+	if s.credentialIssuer != nil {
+		mux.Handle("POST /api/v1/security/users/{accountId}/temporary-credential", s.protect(s.requireIssuer(http.HandlerFunc(s.issueTemporaryCredential))))
+	}
+	if s.linkRequester != nil && s.background != nil {
+		// public by design: a person who is waiting for a link has no token
+		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/email-verifications", s.askForLink)
+	}
+	if s.emailConfirmer != nil {
+		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/email-verifications/confirmations", s.confirmEmail)
+	}
+	if s.recoveryRequester != nil && s.passwordResetter != nil && s.background != nil {
+		// public by design: a person who forgot the password has no token
+		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/password-recoveries", s.askForCode(false))
+		mux.HandleFunc("POST /api/v1/security/public/tenants/{identifier}/password-recoveries/resets", s.resetPassword(false))
+		mux.HandleFunc("POST /api/v1/security/public/platform/password-recoveries", s.askForCode(true))
+		mux.HandleFunc("POST /api/v1/security/public/platform/password-recoveries/resets", s.resetPassword(true))
+	}
 	if s.firstAdmins != nil {
 		mux.Handle("POST /api/v1/security/internal/tenants/{tenantId}/administrators", s.protect(s.requireService(http.HandlerFunc(s.createFirstAdministrator))))
 	}
@@ -90,10 +146,26 @@ type server struct {
 	change   ChangePasswordService
 	outbox   OutboxService
 
-	tenantEvents   TenantEventService
-	accounts       AccountCreator
-	accountTenants TenantFinder
-	firstAdmins    AccountCreator
+	tenantEvents     TenantEventService
+	accounts         AccountCreator
+	accountTenants   TenantFinder
+	firstAdmins      AccountCreator
+	internalUsers    AccountCreator
+	userLister       UserLister
+	supportRequests  SupportRequester
+	emergencyAccess  EmergencyOpener
+	supportDecisions SupportDecider
+	supportSessions  SupportSessionService
+	permissions      PermissionChanger
+	optionalRoles    OptionalRoleManager
+	userStatus       UserStatusChanger
+	credentialIssuer CredentialIssuer
+
+	linkRequester     LinkRequester
+	emailConfirmer    EmailConfirmer
+	recoveryRequester RecoveryRequester
+	passwordResetter  PasswordResetter
+	background        *Background
 }
 
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
